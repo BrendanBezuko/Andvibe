@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_console"
+        android:icon="@drawable/ic_nav_console"
+        android:title="Console" />
+    <item
+        android:id="@+id/nav_files"
+        android:icon="@drawable/ic_nav_files"
+        android:title="Files" />
+    <item
+        android:id="@+id/nav_vibe"
+        android:icon="@drawable/ic_nav_vibe"
+        android:title="Vibe" />
+</menu>
