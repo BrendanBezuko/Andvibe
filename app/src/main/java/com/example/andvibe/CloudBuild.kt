@@ -15,7 +15,10 @@ object CloudBuild {
     private const val MAX_ZIP = 32 * 1024 * 1024
 
     fun build(context: Context, root: File, serviceUrl: String, token: String, log: (String) -> Unit): File {
+        val started = System.currentTimeMillis()
+        DebugLog.step("cloud", "start root=${root.absolutePath}")
         val endpoint = endpoint(serviceUrl)
+        DebugLog.step("cloud", "endpoint host=${hostOf(endpoint)}")
         val zip = File(context.cacheDir, "cloud-src.zip")
         val result = File(context.cacheDir, "cloud-result.bin")
         try {
@@ -23,7 +26,12 @@ object CloudBuild {
             val size = writeZip(root, zip, log)
             log("uploading ${size / 1024} KB to $endpoint")
             log("Cloud Run is compiling. Keep AndVibe open. The first build can take several minutes.")
-            return post(context, endpoint, token, zip, result, root, log)
+            val apk = post(context, endpoint, token, zip, result, root, log)
+            DebugLog.step("cloud", "done ${System.currentTimeMillis() - started}ms path=${apk.absolutePath} bytes=${apk.length()}")
+            return apk
+        } catch (t: Throwable) {
+            DebugLog.step("cloud", "fail ${System.currentTimeMillis() - started}ms ${t.javaClass.simpleName}: ${t.message}")
+            throw t
         } finally {
             zip.delete()
             result.delete()
@@ -43,16 +51,24 @@ object CloudBuild {
     }
 
     private fun writeZip(root: File, dest: File, log: (String) -> Unit): Long {
+        DebugLog.step("cloud.zip", "start ${root.name}")
         if (dest.exists()) dest.delete()
         var count = 0
         var skipped = 0
         ZipOutputStream(dest.outputStream().buffered()).use { zip ->
             RepoFiles.walk(root) { file ->
-                if (file.name == "local.properties") return@walk
+                if (file.name == "local.properties") {
+                    DebugLog.step("cloud.zip", "skip local.properties")
+                    return@walk
+                }
                 val rel = RepoFiles.rel(file, root)
-                if (rel.isBlank() || rel.split('/').any { it == ".." || it.isBlank() }) return@walk
+                if (rel.isBlank() || rel.split('/').any { it == ".." || it.isBlank() }) {
+                    DebugLog.step("cloud.zip", "skip unsafe $rel")
+                    return@walk
+                }
                 if (file.length() > MAX_FILE) {
                     skipped++
+                    DebugLog.step("cloud.zip", "skip large $rel bytes=${file.length()}")
                     return@walk
                 }
                 val entry = ZipEntry(rel)
@@ -64,6 +80,7 @@ object CloudBuild {
         }
         if (skipped > 0) log("skipped $skipped large files")
         log("zipped $count files")
+        DebugLog.step("cloud.zip", "done files=$count skipped=$skipped bytes=${dest.length()}")
         if (dest.length() > MAX_ZIP) {
             error("zip is ${dest.length() / 1024 / 1024}MB. Cloud Run allows 32MB. Leave out big assets.")
         }
@@ -80,6 +97,8 @@ object CloudBuild {
         root: File,
         log: (String) -> Unit
     ): File {
+        val started = System.currentTimeMillis()
+        DebugLog.step("cloud.http", "connect bytes=${zip.length()}")
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
@@ -93,10 +112,13 @@ object CloudBuild {
         try {
             try {
                 zip.inputStream().use { input -> conn.outputStream.use { input.copyTo(it) } }
+                DebugLog.step("cloud.http", "upload sent ${System.currentTimeMillis() - started}ms")
             } catch (t: SocketTimeoutException) {
+                DebugLog.step("cloud.http", "upload timeout ${System.currentTimeMillis() - started}ms")
                 error("could not reach Cloud Run")
             }
             val code = conn.responseCode
+            DebugLog.step("cloud.http", "status=$code ${System.currentTimeMillis() - started}ms")
             if (code == 401) error("Cloud Run rejected the token")
             if (code !in 200..299) {
                 val err = readLimited(conn.errorStream)
@@ -105,6 +127,10 @@ object CloudBuild {
             result.outputStream().use { out -> conn.inputStream.use { it.copyTo(out) } }
             val type = conn.contentType.orEmpty()
             val suggested = headerName(conn) ?: "${safe(root.name)}-debug.apk"
+            DebugLog.step(
+                "cloud.http",
+                "body bytes=${result.length()} type=$type name=$suggested ${System.currentTimeMillis() - started}ms"
+            )
             log("download finished")
             return saveResult(context, result, type, suggested)
         } catch (t: SocketTimeoutException) {
@@ -121,6 +147,7 @@ object CloudBuild {
         if (!zipResult) {
             val dest = File(outDir, safe(suggested))
             tmp.copyTo(dest, overwrite = true)
+            DebugLog.step("cloud.save", "apk path=${dest.absolutePath} bytes=${dest.length()}")
             return dest
         }
         ZipFile(tmp).use { zip ->
@@ -129,6 +156,7 @@ object CloudBuild {
                 ?: error("Cloud Run returned a zip with no APK")
             val dest = File(outDir, safe(File(pick.name).name))
             zip.getInputStream(pick).use { input -> dest.outputStream().use { input.copyTo(it) } }
+            DebugLog.step("cloud.save", "apk path=${dest.absolutePath} bytes=${dest.length()} from=${pick.name}")
             return dest
         }
     }
@@ -152,6 +180,14 @@ object CloudBuild {
                 out.append(buf, 0, n)
             }
             out.toString().trim()
+        }
+    }
+
+    private fun hostOf(url: String): String {
+        return try {
+            URL(url).host.ifBlank { url }
+        } catch (_: Exception) {
+            "bad-url"
         }
     }
 

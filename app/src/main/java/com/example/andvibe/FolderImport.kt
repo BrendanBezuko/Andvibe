@@ -36,6 +36,7 @@ object FolderImport {
     fun importTree(context: Context, treeUri: Uri, repos: File, log: (String) -> Unit): File {
         val raw = displayName(context, treeUri)
         val dest = uniqueDir(repos, raw)
+        DebugLog.step("import", "start name=$raw dest=${dest.name}")
         log("importing $raw")
         val counter = Counter()
         val root = dest.canonicalFile
@@ -44,6 +45,7 @@ object FolderImport {
             val treeId = DocumentsContract.getTreeDocumentId(treeUri)
             copyChildren(context, treeUri, treeId, dest, root, 0, counter)
         } catch (t: Throwable) {
+            DebugLog.step("import", "fail ${t.javaClass.simpleName}: ${t.message}")
             dest.deleteRecursively()
             throw IllegalStateException(t.message ?: "couldn't open that folder")
         }
@@ -53,6 +55,7 @@ object FolderImport {
         if (!File(dest, ".git").exists()) {
             log("no .git in this folder. Init on the Git tab if you want history.")
         }
+        DebugLog.step("import", "done dest=${dest.name} skipped=${counter.skipped} git=${File(dest, ".git").exists()}")
         log("opened ~/${dest.name}")
         return dest
     }

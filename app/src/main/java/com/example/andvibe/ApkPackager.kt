@@ -31,12 +31,15 @@ object ApkPackager {
     private const val MAX_TOTAL = 32 * 1024 * 1024
 
     fun packageApk(context: Context, root: File, log: (String) -> Unit): File {
+        DebugLog.step("pack", "start ${root.absolutePath}")
         val template = File(context.cacheDir, "shell-template.apk")
         try {
             context.assets.open("shell.apk").use { input ->
                 template.outputStream().use { input.copyTo(it) }
             }
+            DebugLog.step("pack", "template bytes=${template.length()}")
         } catch (_: Exception) {
+            DebugLog.step("pack", "missing shell.apk")
             error("APK template is missing. Rebuild AndVibe in Android Studio and install that build, then press Build APK again.")
         }
         val assets = collect(root, log)
@@ -58,6 +61,7 @@ object ApkPackager {
             .setV3SigningEnabled(false)
             .build()
             .sign()
+        DebugLog.step("pack", "signed path=${signed.absolutePath} bytes=${signed.length()}")
         return signed
     }
 

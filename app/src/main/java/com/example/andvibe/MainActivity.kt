@@ -420,11 +420,14 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.io.execute {
             try {
                 val root = AppState.projectRoot()
+                DebugLog.step("build", "start path=${root.absolutePath} gradlew=${File(root, "gradlew").isFile}")
                 AppState.buildLog(RepoFiles.display(root, AppState.reposDir))
                 if (File(root, "gradlew").isFile) {
                     if (url.isBlank() || token.isBlank()) {
+                        DebugLog.step("build", "missing url or token")
                         AppState.buildLog("Paste the Cloud Run URL and build token, then press Build APK again.")
                     } else {
+                        DebugLog.step("build", "mode=cloud")
                         AppState.buildLog("Gradle project. Sending it to Cloud Run.")
                         val apk = CloudBuild.build(appContext, root, url, token, AppState::buildLog)
                         AppState.lastApk = apk.absolutePath
@@ -434,6 +437,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                         AppState.buildLog("Tap Install.")
                     }
                 } else {
+                    DebugLog.step("build", "mode=local")
                     AppState.buildLog(JsRunner.detect(root))
                     AppState.buildLog("")
                     AppState.buildLog(JsRunner.compile(root))
@@ -448,6 +452,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                     AppState.buildLog("Tap Install. The new app is named Built app.")
                 }
             } catch (t: Throwable) {
+                DebugLog.step("build", "fail ${t.javaClass.simpleName}: ${t.message}")
                 AppState.buildLog("build failed: ${t.message ?: t.javaClass.simpleName}")
             } finally {
                 AppState.buildBusy = false
@@ -666,6 +671,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.writtenPaths = emptyList()
         UiBridge.vibeUpdate()
         AppState.io.execute {
+            DebugLog.step("vibe", "start provider=${provider.id} chars=${instruction.length}")
             try {
                 val root = AppState.projectRoot()
                 val edit = AiClient.edit(
@@ -682,11 +688,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 }
                 AppState.vibeResult = report
                 AppState.writtenPaths = edit.written.map { it.canonicalPath }
+                DebugLog.step("vibe", "done files=${edit.written.size}")
                 AppState.log(report)
             } catch (t: Throwable) {
                 val msg = t.message ?: t.javaClass.simpleName
                 AppState.vibeResult = msg
                 AppState.writtenPaths = emptyList()
+                DebugLog.step("vibe", "fail ${t.javaClass.simpleName}: $msg")
                 AppState.log("vibe error: $msg")
             }             finally {
                 AppState.vibeBusy = false
@@ -777,12 +785,17 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.gitBusy = true
         onGit()
         AppState.io.execute {
+            DebugLog.step("git", "start")
             val msg = try {
                 block()
             } catch (t: Throwable) {
+                DebugLog.step("git", "fail ${t.javaClass.simpleName}: ${t.message}")
                 t.message ?: t.javaClass.simpleName
             }
-            if (!msg.isNullOrBlank()) AppState.log(msg)
+            if (!msg.isNullOrBlank()) {
+                DebugLog.step("git", "result ${msg.lineSequence().firstOrNull().orEmpty()}")
+                AppState.log(msg)
+            }
             AppState.gitSnapshot = runCatching {
                 GitOps.snapshot(AppState.cwd, AppState.reposDir)
             }.getOrElse {

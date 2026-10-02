@@ -35,6 +35,8 @@ object AppState {
     private val buildBuffer = StringBuilder()
     private var ready = false
 
+    fun isReady(): Boolean = ready
+
     fun init(context: Context) {
         if (ready) return
         appContext = context.applicationContext
@@ -61,10 +63,12 @@ object AppState {
             }
         }
         UiBridge.updateLog()
+        DebugLog.step("console", text)
     }
 
     fun clear() {
         synchronized(logBuffer) { logBuffer.setLength(0) }
+        DebugLog.step("console", "cleared")
         UiBridge.updateLog()
     }
 
@@ -72,6 +76,7 @@ object AppState {
 
     fun clearBuild() {
         synchronized(buildBuffer) { buildBuffer.setLength(0) }
+        DebugLog.step("build", "cleared")
         UiBridge.buildUpdate()
     }
 
@@ -84,6 +89,7 @@ object AppState {
             }
         }
         UiBridge.buildUpdate()
+        DebugLog.step("build", text)
     }
 }
 
