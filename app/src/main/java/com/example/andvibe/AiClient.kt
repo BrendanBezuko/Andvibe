@@ -78,6 +78,38 @@ object AiClient {
         return EditResult(report, written)
     }
 
+    fun complete(
+        system: String,
+        user: String,
+        provider: Provider,
+        key: String,
+        model: String,
+        base: String
+    ): String {
+        if (user.length > 16_000) error("prompt is too long")
+        if (key.isBlank()) error("add an API key on the Vibe tab")
+        if (model.isBlank()) error("set a model name")
+        if (model.any { it.isWhitespace() }) error("model name has a space")
+        val baseUrl = base.ifBlank { provider.defaultBase }
+        if (baseUrl.isBlank()) error("set a base URL")
+        if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
+            error("base URL must start with https://")
+        }
+        val messages = listOf("user" to user)
+        val reply = when (provider) {
+            Provider.ANTHROPIC -> anthropic(baseUrl, key, model, messages, system)
+            Provider.GEMINI -> gemini(baseUrl, key, model, messages, system)
+            else -> openaiCompatible(baseUrl, key, model, messages, system)
+        }
+        val charged = if (reply.input == 0L && reply.output == 0L) {
+            reply.copy(input = guessTokens(user.length + system.length), output = guessTokens(reply.text.length))
+        } else {
+            reply
+        }
+        WorkspaceStore.addUse(model, charged.input, charged.output)
+        return reply.text.trim()
+    }
+
     private fun buildPrompt(root: File, cwd: File, open: File?, instruction: String): String {
         val files = chooseFiles(root, open)
         return buildString {
@@ -294,14 +326,15 @@ object AiClient {
         base: String,
         key: String,
         model: String,
-        messages: List<Pair<String, String>>
+        messages: List<Pair<String, String>>,
+        system: String = systemPrompt
     ): Reply {
         return try {
-            chatCompletions(base, key, model, messages)
+            chatCompletions(base, key, model, messages, system)
         } catch (e: IllegalStateException) {
             val message = e.message.orEmpty()
             if (message.startsWith("HTTP 404") || message.contains("/v1/responses")) {
-                responses(base, key, model, messages)
+                responses(base, key, model, messages, system)
             } else {
                 throw e
             }
@@ -312,13 +345,14 @@ object AiClient {
         base: String,
         key: String,
         model: String,
-        messages: List<Pair<String, String>>
+        messages: List<Pair<String, String>>,
+        system: String = systemPrompt
     ): Reply {
         fun once(field: String): Reply {
             val body = JSONObject()
             body.put("model", model)
             val arr = JSONArray()
-            arr.put(JSONObject().put("role", "system").put("content", systemPrompt))
+            arr.put(JSONObject().put("role", "system").put("content", system))
             for ((role, content) in messages) {
                 arr.put(JSONObject().put("role", role).put("content", content))
             }
@@ -344,11 +378,12 @@ object AiClient {
         base: String,
         key: String,
         model: String,
-        messages: List<Pair<String, String>>
+        messages: List<Pair<String, String>>,
+        system: String = systemPrompt
     ): Reply {
         val body = JSONObject()
         body.put("model", model)
-        body.put("instructions", systemPrompt)
+        body.put("instructions", system)
         body.put("max_output_tokens", 8192)
         val input = JSONArray()
         for ((role, content) in messages) {
@@ -360,11 +395,17 @@ object AiClient {
         return Reply(responsesText(raw), use.first, use.second)
     }
 
-    private fun anthropic(base: String, key: String, model: String, messages: List<Pair<String, String>>): Reply {
+    private fun anthropic(
+        base: String,
+        key: String,
+        model: String,
+        messages: List<Pair<String, String>>,
+        system: String = systemPrompt
+    ): Reply {
         val body = JSONObject()
         body.put("model", model)
         body.put("max_tokens", 8192)
-        body.put("system", systemPrompt)
+        body.put("system", system)
         val arr = JSONArray()
         for ((role, content) in messages) {
             arr.put(JSONObject().put("role", role).put("content", content))
@@ -385,12 +426,18 @@ object AiClient {
         return Reply(out.toString(), use.first, use.second)
     }
 
-    private fun gemini(base: String, key: String, model: String, messages: List<Pair<String, String>>): Reply {
+    private fun gemini(
+        base: String,
+        key: String,
+        model: String,
+        messages: List<Pair<String, String>>,
+        system: String = systemPrompt
+    ): Reply {
         val modelId = model.removePrefix("models/").trim()
         val body = JSONObject()
         body.put(
             "systemInstruction",
-            JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt)))
+            JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system)))
         )
         val contents = JSONArray()
         for ((role, content) in messages) {

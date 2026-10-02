@@ -12,13 +12,16 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.example.andvibe.databinding.ActivityMainBinding
 import com.example.andvibe.databinding.RowCardBinding
+import com.example.andvibe.databinding.RowGitFileBinding
 import com.google.android.material.checkbox.MaterialCheckBox
 import java.io.File
 
@@ -30,7 +33,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private var savedText = ""
     private var editing = false
     private var displayed = emptyList<File>()
-    private var gitChanges = emptyList<GitOps.Change>()
     private var settingsOpen = false
     private var boardOpen = false
     private var workspaceOpen = false
@@ -234,20 +236,18 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         page.gitDetailScroll.visibility = if (showDetail) View.VISIBLE else View.GONE
         page.gitDetailClose.visibility = if (showDetail) View.VISIBLE else View.GONE
         page.gitComposer.visibility = if (showDetail) View.GONE else View.VISIBLE
-        page.gitChanges.visibility = if (showDetail) View.GONE else View.VISIBLE
+        val showLists = !showDetail && snap?.isRepo == true
+        page.gitScroll.visibility = if (showLists) View.VISIBLE else View.GONE
         page.gitEmpty.text = when {
             snap == null -> "Open a project from Files."
             !snap.isRepo -> snap.summary
             else -> "No changes"
         }
-        page.gitEmpty.visibility = if (!showDetail && (snap == null || snap.changes.isEmpty())) {
-            View.VISIBLE
-        } else {
-            View.GONE
-        }
-        if (!showDetail) {
-            gitChanges = snap?.changes.orEmpty()
-            page.gitChanges.adapter = ArrayAdapter(this, R.layout.row_file, gitChanges.map { it.label })
+        page.gitEmpty.visibility = if (!showDetail && !showLists) View.VISIBLE else View.GONE
+        if (showLists && snap != null) {
+            val y = page.gitScroll.scrollY
+            fillGitLists(page.gitLists, snap)
+            page.gitScroll.post { page.gitScroll.scrollTo(0, y) }
         }
         val enabled = !AppState.gitBusy
         page.gitRefresh.isEnabled = enabled
@@ -260,6 +260,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         page.gitLog.isEnabled = enabled
         page.gitInit.isEnabled = enabled
         page.gitCommit.isEnabled = enabled
+        page.gitSuggest.isEnabled = enabled && snap?.isRepo == true && snap.changes.isNotEmpty()
         syncBack()
     }
 
@@ -296,6 +297,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
         }
         binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+        binding.settingsPage.saveGit.setOnClickListener { saveGitSettings() }
     }
 
     private fun openSettings() {
@@ -303,6 +305,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         if (workspaceOpen) closeWorkspace()
         settingsOpen = true
         binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+        loadGitSettings()
         binding.settingsPage.root.visibility = View.VISIBLE
         syncBack()
     }
@@ -697,12 +700,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             }
         }
         page.gitCommit.setOnClickListener { commitGit() }
-        page.gitAccount.setOnClickListener { showGitAccount() }
+        page.gitSuggest.setOnClickListener { suggestCommitMessage() }
         page.gitDetailClose.setOnClickListener { closeGitDetail() }
-        page.gitChanges.setOnItemClickListener { _, _, position, _ ->
-            val change = gitChanges.getOrNull(position) ?: return@setOnItemClickListener
-            showChangeMenu(change)
-        }
     }
 
     private fun setupBuild() {
@@ -826,7 +825,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 )
                 note(edit.report)
                 if (edit.written.isNotEmpty()) {
-                    note(GitOps.commitChat(root, edit.written, "revise build"))
                     AppState.writtenPaths = edit.written.map { it.canonicalPath }
                     UiBridge.filesChanged()
                     UiBridge.vibeUpdate()
@@ -1076,8 +1074,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 val report = buildString {
                     append(edit.report)
                     if (edit.written.isNotEmpty()) {
-                        append('\n')
-                        append(GitOps.commitChat(root, edit.written, instruction))
                         if (!AppState.gitBusy) {
                             AppState.gitSnapshot = runCatching {
                                 GitOps.snapshot(AppState.cwd, AppState.reposDir)
@@ -1228,44 +1224,149 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
     }
 
-    private fun showGitAccount() {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = (20 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad / 2, pad, 0)
+    private fun loadGitSettings() {
+        val page = binding.settingsPage
+        page.gitName.setText(GitOps.authorName)
+        page.gitEmail.setText(GitOps.authorEmail)
+        page.gitHttpsUser.setText(GitOps.remoteUser)
+        page.gitHttpsToken.setText(GitOps.remoteToken)
+        page.gitSsh.setText(store.gitSsh())
+        page.gitOrigin.setText(
+            runCatching { GitOps.originUrl(AppState.cwd, AppState.reposDir) }.getOrDefault("")
+        )
+        page.gitSettingsNote.text = ""
+    }
+
+    private fun saveGitSettings() {
+        val page = binding.settingsPage
+        GitOps.authorName = page.gitName.text?.toString()?.trim().orEmpty().ifBlank { "AndVibe" }
+        GitOps.authorEmail = page.gitEmail.text?.toString()?.trim().orEmpty().ifBlank { "andvibe@local" }
+        GitOps.remoteUser = page.gitHttpsUser.text?.toString()?.trim().orEmpty()
+        GitOps.remoteToken = page.gitHttpsToken.text?.toString().orEmpty()
+        val ssh = page.gitSsh.text?.toString().orEmpty()
+        store.saveGit(GitOps.authorName, GitOps.authorEmail, GitOps.remoteUser, GitOps.remoteToken, ssh)
+        val origin = page.gitOrigin.text?.toString()?.trim().orEmpty()
+        val note = if (origin.isEmpty()) {
+            "Saved the account."
+        } else {
+            runCatching { GitOps.setOrigin(AppState.cwd, AppState.reposDir, origin) }
+                .getOrElse { it.message ?: "could not set origin" }
         }
-        fun field(hint: String, value: String, password: Boolean = false) = EditText(this).apply {
-            this.hint = hint
-            setText(value)
-            setSingleLine(true)
-            if (password) {
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        page.gitSettingsNote.text = note
+        AppState.log(note)
+        if (AppState.tab == AppState.Tab.GIT) refreshGit()
+    }
+
+    private fun fillGitLists(parent: LinearLayout, snap: GitOps.Snapshot) {
+        parent.removeAllViews()
+        gitHeading(parent, "Changes")
+        val unstaged = snap.changes.filter { it.unstaged }
+        if (unstaged.isEmpty()) gitNote(parent, "No unstaged changes")
+        else unstaged.forEach { gitFileRow(parent, it, stage = true) }
+        gitHeading(parent, "Staged")
+        val staged = snap.changes.filter { it.staged }
+        if (staged.isEmpty()) gitNote(parent, "Nothing staged")
+        else staged.forEach { gitFileRow(parent, it, stage = false) }
+        gitHeading(parent, "Commits")
+        if (snap.commits.isEmpty()) gitNote(parent, "No commits yet")
+        else snap.commits.forEach { gitCommitRow(parent, it) }
+    }
+
+    private fun gitHeading(parent: LinearLayout, title: String) {
+        val view = TextView(this)
+        view.text = title
+        view.setTextColor(ContextCompat.getColor(this, R.color.ink))
+        view.textSize = 14f
+        val top = if (parent.childCount == 0) 0 else (14 * resources.displayMetrics.density).toInt()
+        view.setPadding(0, top, 0, (4 * resources.displayMetrics.density).toInt())
+        parent.addView(view)
+    }
+
+    private fun gitNote(parent: LinearLayout, text: String) {
+        val view = TextView(this)
+        view.text = text
+        view.setTextColor(ContextCompat.getColor(this, R.color.muted))
+        view.textSize = 13f
+        view.setPadding(0, (4 * resources.displayMetrics.density).toInt(), 0, 0)
+        parent.addView(view)
+    }
+
+    private fun gitFileRow(parent: LinearLayout, change: GitOps.Change, stage: Boolean) {
+        val row = RowGitFileBinding.inflate(layoutInflater, parent, false)
+        row.gitPath.text = change.label
+        row.gitMark.text = if (stage) "+" else "−"
+        row.gitPath.setOnClickListener { showChangeMenu(change) }
+        row.gitMark.setOnClickListener {
+            runGit {
+                AppState.gitDetail = null
+                if (stage) GitOps.stage(AppState.cwd, AppState.reposDir, change.path)
+                else GitOps.unstage(AppState.cwd, AppState.reposDir, change.path)
             }
-            layout.addView(
-                this,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
+        }
+        parent.addView(row.root)
+    }
+
+    private fun gitCommitRow(parent: LinearLayout, commit: GitOps.CommitLine) {
+        val view = TextView(this)
+        view.text = "${commit.id}  ${commit.whenText}  ${commit.subject}"
+        view.setTextColor(ContextCompat.getColor(this, R.color.ink))
+        view.textSize = 13f
+        view.typeface = android.graphics.Typeface.MONOSPACE
+        val pad = (6 * resources.displayMetrics.density).toInt()
+        view.setPadding(0, pad, 0, pad)
+        view.setOnClickListener {
+            AppState.gitDetail = "${commit.id} ${commit.whenText}\n${commit.subject}"
+            onGit()
+        }
+        parent.addView(view)
+    }
+
+    private fun suggestCommitMessage() {
+        if (AppState.gitBusy) return
+        val snap = AppState.gitSnapshot
+        if (snap == null || !snap.isRepo || snap.changes.isEmpty()) {
+            binding.gitPage.gitSummary.text = "Nothing to describe."
+            return
+        }
+        saveProvider(currentProvider)
+        val provider = currentProvider
+        val key = store.get(provider, "key", "")
+        val model = store.get(provider, "model", provider.defaultModel)
+        val base = store.get(provider, "base", provider.defaultBase)
+        if (key.isBlank() || model.isBlank()) {
+            AppState.log("Add an API key on the Vibe tab, then tap Message.")
+            return
+        }
+        saveEditor(announce = false)
+        AppState.gitBusy = true
+        onGit()
+        val cwd = AppState.cwd
+        val repos = AppState.reposDir
+        AppState.io.execute {
+            val text = try {
+                val files = snap.changes.joinToString("\n") { it.label }
+                val diff = GitOps.diff(cwd, repos, null, false).take(4000)
+                val staged = GitOps.diff(cwd, repos, null, true).take(2000)
+                val raw = AiClient.complete(
+                    "Reply with one git commit subject and nothing else. No quotes.",
+                    "Changes:\n$files\n\nUnstaged diff:\n$diff\n\nStaged diff:\n$staged",
+                    provider,
+                    key,
+                    model,
+                    base
                 )
-            )
-        }
-        val name = field("Name", GitOps.authorName)
-        val email = field("Email", GitOps.authorEmail)
-        val user = field("HTTPS user", GitOps.remoteUser)
-        val token = field("HTTPS token or password", GitOps.remoteToken, password = true)
-        AlertDialog.Builder(this)
-            .setTitle("Git account")
-            .setMessage("Push uses the token as the HTTPS password. GitHub wants a personal access token.")
-            .setView(layout)
-            .setPositiveButton("Save") { _, _ ->
-                GitOps.authorName = name.text.toString().trim().ifBlank { "AndVibe" }
-                GitOps.authorEmail = email.text.toString().trim().ifBlank { "andvibe@local" }
-                GitOps.remoteUser = user.text.toString().trim()
-                GitOps.remoteToken = token.text.toString()
-                store.saveGit(GitOps.authorName, GitOps.authorEmail, GitOps.remoteUser, GitOps.remoteToken)
+                raw.lineSequence().map { it.trim().trim('"') }.firstOrNull { it.isNotEmpty() }.orEmpty()
+                    .let { if (it.length <= 72) it else it.take(69).trimEnd() + "..." }
+            } catch (t: Throwable) {
+                AppState.log(t.message ?: "could not write a message")
+                ""
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+            AppState.gitBusy = false
+            runOnUiThread {
+                if (!isFinishing && text.isNotEmpty()) binding.gitPage.gitMessage.setText(text)
+                onGit()
+            }
+        }
     }
 
     private fun showBranches() {

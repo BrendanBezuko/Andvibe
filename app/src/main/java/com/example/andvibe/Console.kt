@@ -24,7 +24,7 @@ AndVibe
   run [file]                   preview HTML or run JS
 
 Open an older folder from Files, or clone a public repo.
-Each Vibe chat commits the files it changes, using your message.
+Vibe writes files and leaves them uncommitted. Stage and commit them on the Git tab.
 The Git tab stages, commits, and pushes. Edit on Vibe, then Build.
 A project with gradlew uploads to Cloud Run, and the build log streams here. Revise on the Build tab edits the project on this phone. The API key stays on the device. Other projects pack on the phone.
 

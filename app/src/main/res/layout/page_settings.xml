@@ -55,5 +55,130 @@
             android:text="The server listens on this device. Cursor on the computer reaches it with adb forward. adb reverse takes this same port on the device, so the server cannot bind. A request time here means something connected."
             android:textColor="@color/muted"
             android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Git"
+            android:textColor="@color/ink"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/gitName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel"
+            android:hint="Name"
+            android:importantForAutofill="no"
+            android:inputType="textPersonName"
+            android:padding="10dp"
+            android:singleLine="true"
+            android:textColor="@color/ink"
+            android:textColorHint="@color/muted"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/gitEmail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel"
+            android:hint="Email"
+            android:importantForAutofill="no"
+            android:inputType="textEmailAddress"
+            android:padding="10dp"
+            android:singleLine="true"
+            android:textColor="@color/ink"
+            android:textColorHint="@color/muted"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/gitHttpsUser"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel"
+            android:hint="HTTPS user"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:padding="10dp"
+            android:singleLine="true"
+            android:textColor="@color/ink"
+            android:textColorHint="@color/muted"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/gitHttpsToken"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel"
+            android:hint="HTTPS token"
+            android:importantForAutofill="no"
+            android:inputType="textPassword"
+            android:padding="10dp"
+            android:singleLine="true"
+            android:textColor="@color/ink"
+            android:textColorHint="@color/muted"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/gitOrigin"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel"
+            android:hint="Origin for this project"
+            android:importantForAutofill="no"
+            android:inputType="textUri"
+            android:padding="10dp"
+            android:singleLine="true"
+            android:textColor="@color/ink"
+            android:textColorHint="@color/muted"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/gitSsh"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@color/panel"
+            android:gravity="top|start"
+            android:hint="SSH private key"
+            android:importantForAutofill="no"
+            android:inputType="textMultiLine"
+            android:minLines="3"
+            android:padding="10dp"
+            android:textColor="@color/ink"
+            android:textColorHint="@color/muted"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Name, email, token, and the SSH key stay on this phone. Origin is the remote for the project that is open. Push and pull use the HTTPS token, so set an https:// origin."
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/saveGit"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="40dp"
+            android:text="Save git"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/gitSettingsNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
     </LinearLayout>
 </ScrollView>

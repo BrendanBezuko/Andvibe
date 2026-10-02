@@ -60,7 +60,7 @@ The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or
 
 **Account** stores the git name, email, and an HTTPS token with the other secrets. GitHub wants a personal access token, not the account password.
 
-Each Vibe chat commits the files it changed, using your message as the subject. **Revise** on the Build tab does the same after it edits the project from the build log.
+Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a file, or Stage all, then Commit. Message asks the model for a subject and does not commit. The commit list is the history of the current branch. Name, email, HTTPS token, SSH key, and this project's origin are in Settings.
 
 ## Vibe
 

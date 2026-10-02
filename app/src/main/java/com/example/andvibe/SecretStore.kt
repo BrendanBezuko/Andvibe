@@ -51,12 +51,15 @@ class SecretStore(context: Context) {
 
     fun gitToken(): String = prefs.getString("git_token", "") ?: ""
 
-    fun saveGit(name: String, email: String, user: String, token: String) {
+    fun gitSsh(): String = prefs.getString("git_ssh", "") ?: ""
+
+    fun saveGit(name: String, email: String, user: String, token: String, ssh: String) {
         prefs.edit()
             .putString("git_name", name)
             .putString("git_email", email)
             .putString("git_user", user)
             .putString("git_token", token)
+            .putString("git_ssh", ssh)
             .apply()
     }
 

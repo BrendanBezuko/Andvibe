@@ -129,13 +129,18 @@
         android:layout_marginTop="8dp"
         android:layout_weight="1">
 
-        <ListView
-            android:id="@+id/gitChanges"
+        <ScrollView
+            android:id="@+id/gitScroll"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:cacheColorHint="@android:color/transparent"
-            android:divider="@android:color/transparent"
-            android:dividerHeight="0dp" />
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:id="@+id/gitLists"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
 
         <TextView
             android:id="@+id/gitEmpty"
@@ -211,12 +216,12 @@
                 android:text="Commit" />
 
             <Button
-                android:id="@+id/gitAccount"
+                android:id="@+id/gitSuggest"
                 style="?attr/materialButtonOutlinedStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
-                android:text="Account" />
+                android:text="Message" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

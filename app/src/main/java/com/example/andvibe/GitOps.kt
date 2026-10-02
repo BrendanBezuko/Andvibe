@@ -31,11 +31,14 @@ object GitOps {
         val label: String get() = "$code $path"
     }
 
+    data class CommitLine(val id: String, val subject: String, val whenText: String)
+
     data class Snapshot(
         val branch: String,
         val summary: String,
         val changes: List<Change>,
-        val isRepo: Boolean
+        val isRepo: Boolean,
+        val commits: List<CommitLine> = emptyList()
     )
 
     fun snapshot(start: File, repos: File): Snapshot {
@@ -171,10 +174,7 @@ object GitOps {
                 val dirty = staged || status.modified.isNotEmpty() || status.missing.isNotEmpty() ||
                     status.untracked.isNotEmpty() || status.untrackedFolders.isNotEmpty()
                 if (!dirty) return@use "nothing to commit"
-                if (!staged) {
-                    git.add().addFilepattern(".").call()
-                    git.add().setUpdate(true).addFilepattern(".").call()
-                }
+                if (!staged) return@use "Nothing is staged. Tap + on a file, or Stage all."
                 val rev = git.commit()
                     .setMessage(text)
                     .setAuthor(name, email)
@@ -379,13 +379,16 @@ object GitOps {
 
     fun push(start: File, repos: File): String {
         if (remoteToken.isBlank()) {
-            return "Add an HTTPS token in Git, Account. GitHub wants a personal access token."
+            return "Add an HTTPS token in Settings. GitHub wants a personal access token."
         }
         return network(start, repos, "push") { git ->
             val url = git.repository.config.getString("remote", "origin", "url")
-            if (url.isNullOrBlank()) return@network "no origin remote. git remote add origin https://…"
+            if (url.isNullOrBlank()) return@network "No origin. Set it in Settings."
+            if (url.startsWith("git@") || url.startsWith("ssh://")) {
+                return@network "This origin is SSH. Set an https:// origin in Settings. Push uses the HTTPS token."
+            }
             val branch = git.repository.branch ?: return@network "detached HEAD"
-            val creds = credentials() ?: return@network "Add an HTTPS token in Git, Account."
+            val creds = credentials() ?: return@network "Add an HTTPS token in Settings."
             val results = git.push()
                 .setRemote("origin")
                 .setRefSpecs(RefSpec("refs/heads/$branch:refs/heads/$branch"))
@@ -496,7 +499,53 @@ object GitOps {
             append(" · ").append(track)
             if (!remote.isNullOrBlank()) append("\n").append(remote)
         }
-        return Snapshot(branch, summary, shown, true)
+        val commits = ArrayList<CommitLine>(120)
+        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        runCatching {
+            for (commit in git.log().setMaxCount(120).call()) {
+                commits.add(
+                    CommitLine(
+                        commit.name.take(7),
+                        commit.shortMessage.ifBlank { "(no message)" },
+                        fmt.format(commit.authorIdent.getWhen())
+                    )
+                )
+            }
+        }
+        return Snapshot(branch, summary, shown, true, commits)
+    }
+
+    fun originUrl(start: File, repos: File): String {
+        val root = RepoFiles.gitRoot(start, repos) ?: return ""
+        return try {
+            Git.open(root).use { git ->
+                git.repository.config.getString("remote", "origin", "url").orEmpty()
+            }
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
+    fun setOrigin(start: File, repos: File, url: String): String {
+        val gitUrl = url.trim()
+        if (gitUrl.isEmpty()) return "origin unchanged"
+        if (gitUrl.any { it.isWhitespace() }) return "origin has a space"
+        val root = repo(start, repos)
+        return try {
+            prepare()
+            Git.open(root).use { git ->
+                val existing = git.repository.config.getString("remote", "origin", "url")
+                val uri = URIish(gitUrl)
+                if (existing.isNullOrBlank()) {
+                    git.remoteAdd().setName("origin").setUri(uri).call()
+                } else {
+                    git.remoteSetUrl().setRemoteName("origin").setRemoteUri(uri).call()
+                }
+                "origin $gitUrl"
+            }
+        } catch (t: Throwable) {
+            fail("remote", t)
+        }
     }
 
     private fun inHead(git: Git, rel: String): Boolean {
