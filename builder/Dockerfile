@@ -33,7 +33,7 @@ RUN useradd --create-home --shell /usr/sbin/nologin builder \
     && mkdir -p /home/builder/work \
     && chown -R builder:builder /home/builder
 
-COPY server.py /opt/server.py
+COPY server.py agent.py /opt/
 
 USER builder
 WORKDIR /home/builder

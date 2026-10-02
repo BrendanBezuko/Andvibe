@@ -178,7 +178,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val nearBottom = child == null || child.bottom <= scroll.height + scroll.scrollY + 160
         val text = AppState.buildText()
         binding.buildPage.buildLog.text = text.ifBlank {
-            "Paste the Cloud Run URL and token. Build APK uploads a Gradle project and waits for the APK."
+            "Paste the Cloud Run URL and token. A failed Gradle build is fixed on Cloud Run. Token use and the changed files show up in Console."
         }
         val root = runCatching { AppState.projectRoot() }.getOrNull()
         binding.buildPage.projectLine.text = if (root == null) {
@@ -448,27 +448,56 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val url = binding.buildPage.buildUrl.text?.toString()?.trim().orEmpty()
         val token = binding.buildPage.buildToken.text?.toString()?.trim().orEmpty()
         saveBuildServer()
+        saveProvider(currentProvider)
+        val provider = currentProvider
+        val agent = AgentAuth(
+            provider.id,
+            store.get(provider, "key", ""),
+            store.get(provider, "model", provider.defaultModel),
+            store.get(provider, "base", provider.defaultBase),
+        )
         AppState.buildBusy = true
         AppState.clearBuild()
         val appContext = applicationContext
         AppState.io.execute {
+            val written = mutableListOf<File>()
+            var cloud = false
             try {
                 val root = AppState.projectRoot()
-                DebugLog.step("build", "start path=${root.absolutePath} gradlew=${File(root, "gradlew").isFile}")
+                cloud = File(root, "gradlew").isFile
+                DebugLog.step("build", "start path=${root.absolutePath} gradlew=$cloud")
                 AppState.buildLog(RepoFiles.display(root, AppState.reposDir))
-                if (File(root, "gradlew").isFile) {
+                if (cloud) {
                     if (url.isBlank() || token.isBlank()) {
                         DebugLog.step("build", "missing url or token")
                         AppState.buildLog("Paste the Cloud Run URL and build token, then press Build APK again.")
                     } else {
                         DebugLog.step("build", "mode=cloud")
-                        AppState.buildLog("Gradle project. Sending it to Cloud Run.")
-                        val apk = CloudBuild.build(appContext, root, url, token, AppState::buildLog)
-                        AppState.lastApk = apk.absolutePath
-                        AppState.buildLog("")
-                        AppState.buildLog("APK")
-                        AppState.buildLog(apk.absolutePath)
-                        AppState.buildLog("Tap Install.")
+                        val note: (String) -> Unit = { line ->
+                            AppState.buildLog(line)
+                            AppState.log(line)
+                        }
+                        note("Gradle project. Sending it to Cloud Run.")
+                        if (agent.key.isBlank() || agent.model.isBlank()) {
+                            note("No Vibe model key is saved, so a failed build will not be auto-fixed.")
+                        }
+                        val built = CloudBuild.build(appContext, root, url, token, agent, note) { path, content ->
+                            written.add(CloudBuild.writeChange(root, path, content))
+                            UiBridge.filesChanged()
+                        }
+                        if (written.isNotEmpty()) {
+                            val committed = GitOps.commitChat(
+                                root,
+                                written.distinctBy { it.canonicalPath },
+                                built.summary.ifBlank { "fix build" }
+                            )
+                            note(committed)
+                        }
+                        AppState.lastApk = built.apk.absolutePath
+                        note("")
+                        note("APK")
+                        note(built.apk.absolutePath)
+                        note("Tap Install.")
                     }
                 } else {
                     DebugLog.step("build", "mode=local")
@@ -487,8 +516,16 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 }
             } catch (t: Throwable) {
                 DebugLog.step("build", "fail ${t.javaClass.simpleName}: ${t.message}")
-                AppState.buildLog("build failed: ${t.message ?: t.javaClass.simpleName}")
+                val message = "build failed: ${t.message ?: t.javaClass.simpleName}"
+                AppState.buildLog(message)
+                if (cloud) AppState.log(message)
             } finally {
+                if (written.isNotEmpty() && !AppState.gitBusy) {
+                    AppState.gitSnapshot = runCatching {
+                        GitOps.snapshot(AppState.cwd, AppState.reposDir)
+                    }.getOrNull()
+                    UiBridge.gitUpdate()
+                }
                 AppState.buildBusy = false
                 UiBridge.buildUpdate()
             }

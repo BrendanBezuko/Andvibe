@@ -15,7 +15,6 @@
         android:extractNativeLibs="false"
         android:icon="@drawable/ic_shell"
         android:label="Built app"
-        android:testOnly="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:usesCleartextTraffic="true" >
         <activity

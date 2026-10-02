@@ -91,7 +91,7 @@
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
             android:lineSpacingExtra="2dp"
-            android:text="Paste the Cloud Run URL and token. Build APK uploads a Gradle project and waits for the APK."
+            android:text="Paste the Cloud Run URL and token. A failed Gradle build is fixed on Cloud Run. Token use and the changed files show up in Console."
             android:textColor="@color/ink"
             android:textIsSelectable="true"
             android:textSize="13sp" />

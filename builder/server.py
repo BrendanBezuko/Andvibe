@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """POST a project zip to /build and get an APK back.
 
+The response is chunked application/x-ndjson. Each line is an event.
+Gradle progress, agent status, token use, and changed files stream as
+they happen. The apk event names the byte length, and the raw APK
+follows that line. Only files the agent changed are sent back.
+
 Cloud Run's request body limit is 32MB. Dependencies are downloaded
 during the Gradle run, so the zip should be source plus the wrapper.
 """
 
 import io
+import json
 import os
 import secrets
 import shutil
@@ -18,6 +24,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import agent
+
 PORT = int(os.environ.get("PORT", "8080"))
 TOKEN = os.environ.get("BUILD_TOKEN", "")
 SDK = os.environ.get("ANDROID_HOME", "/opt/android-sdk")
@@ -25,6 +33,7 @@ MAX_ZIP = 32 * 1024 * 1024
 MAX_UNCOMPRESSED = 400 * 1024 * 1024
 MAX_FILES = 8000
 TIMEOUT = int(os.environ.get("BUILD_TIMEOUT", "3000"))
+FIXES = max(0, int(os.environ.get("BUILD_FIXES", "2")))
 BUILD_LOCK = threading.Lock()
 SKIP_PARTS = {".gradle", ".git", "build", ".idea", "__MACOSX"}
 
@@ -87,6 +96,24 @@ def project_root(dest: Path) -> Path:
     return dest
 
 
+def worth_line(line: str) -> bool:
+    text = line.strip()
+    if not text:
+        return False
+    if text.startswith("> Task") or text.startswith("BUILD "):
+        return True
+    markers = (
+        "FAILED",
+        "FAILURE:",
+        "error:",
+        "e: ",
+        "w: ",
+        "Execution failed",
+        "What went wrong",
+    )
+    return any(marker in text for marker in markers)
+
+
 def find_apks(root: Path, task: str) -> list[Path]:
     found = []
     for path in root.rglob("*.apk"):
@@ -134,6 +161,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(429, b"a build is already running\n", "text/plain")
             return
         work = None
+        streaming = False
         try:
             data = self.rfile.read(length)
             if not zipfile.is_zipfile(io.BytesIO(data)):
@@ -155,55 +183,193 @@ class Handler(BaseHTTPRequestHandler):
             if b"\r\n" in wrapper[:300]:
                 gradlew.write_bytes(wrapper.replace(b"\r\n", b"\n"))
             (root / "local.properties").write_text(f"sdk.dir={SDK}\n", encoding="utf-8")
-            print(f"building {task} in {root.name}", flush=True)
-            try:
-                proc = subprocess.run(
-                    [str(gradlew), "--no-daemon", "--no-watch-fs", task],
-                    cwd=root,
-                    env=os.environ.copy(),
-                    capture_output=True,
-                    text=True,
-                    timeout=TIMEOUT,
-                )
-                log = (proc.stdout or "") + (proc.stderr or "")
-            except subprocess.TimeoutExpired as exc:
-                log = (exc.stdout or "") + (exc.stderr or "")
-                self._fail(504, "build timed out\n" + log[-120_000:])
+            cfg = agent.config_from(self.headers)
+            print(f"building {task} in {root.name} agent={cfg is not None}", flush=True)
+            self._begin_stream()
+            streaming = True
+            summary = self._compile(root, task, cfg)
+            if summary is None:
                 return
-            print(log[-8000:], flush=True)
-            if proc.returncode != 0:
-                self._fail(422, log[-120_000:] or "gradle failed\n")
+            packed = self._package(root, task)
+            if packed is None:
+                self._emit({"event": "error", "text": "gradle finished but no APK was produced"})
                 return
-            apks = find_apks(root, task)
-            app_apks = [path for path in apks if path.name in ("app-debug.apk", "app-release.apk")]
-            if len(app_apks) == 1:
-                apks = app_apks
-            if not apks:
-                self._fail(422, "gradle finished but no APK was produced\n" + log[-40_000:])
-                return
-            if len(apks) == 1:
-                body = apks[0].read_bytes()
-                self._send(
-                    200,
-                    body,
-                    "application/vnd.android.package-archive",
-                    extra={"Content-Disposition": f'attachment; filename="{apks[0].name}"'},
-                )
-                return
-            packed = io.BytesIO()
-            with zipfile.ZipFile(packed, "w", zipfile.ZIP_DEFLATED) as out:
-                for apk in apks:
-                    out.write(apk, apk.name)
-            self._send(
-                200,
-                packed.getvalue(),
-                "application/zip",
-                extra={"Content-Disposition": 'attachment; filename="apks.zip"'},
-            )
+            name, body = packed
+            self._emit({"event": "apk", "name": name, "bytes": len(body), "summary": summary})
+            self._raw(body)
+        except Exception as exc:
+            print(f"build error {exc}", flush=True)
+            if streaming:
+                try:
+                    self._emit({"event": "error", "text": str(exc)[:1500]})
+                except Exception:
+                    pass
+            else:
+                self._fail(500, str(exc)[:1500])
         finally:
+            if streaming:
+                try:
+                    self._end_stream()
+                except Exception:
+                    pass
             if work is not None:
                 shutil.rmtree(work, ignore_errors=True)
             BUILD_LOCK.release()
+
+    def _compile(self, root: Path, task: str, cfg: dict | None) -> str | None:
+        summary = ""
+        totals = {"input": 0, "output": 0}
+        attempts = FIXES + 1 if cfg else 1
+        for attempt in range(attempts):
+            label = f"gradle {task}" if attempt == 0 else f"gradle {task} (try {attempt + 1})"
+            self._emit({"event": "log", "text": label})
+            try:
+                code, log = self._gradle(root, task)
+            except TimeoutError:
+                self._emit({"event": "error", "text": "build timed out"})
+                return None
+            print(log[-4000:], flush=True)
+            if code == 0:
+                self._emit({"event": "log", "text": "BUILD SUCCESSFUL"})
+                return summary
+            self._emit({"event": "log", "text": "gradle failed"})
+            if cfg is None or attempt == attempts - 1:
+                tail = (log[-2000:] or "gradle failed").strip()
+                why = "still failing after auto-fix" if cfg else "gradle failed, and no Vibe API key was sent to auto-fix it"
+                self._emit({"event": "error", "text": why + "\n" + tail})
+                return None
+            self._emit({"event": "agent", "text": f"asking {cfg['model']} to fix the compile error"})
+            try:
+                summary, edits, usage = agent.repair(root, log, cfg, self._emit)
+            except Exception as exc:
+                self._emit({"event": "error", "text": f"agent failed: {exc}"})
+                return None
+            if usage:
+                totals["input"] += usage[0]
+                totals["output"] += usage[1]
+                self._emit(
+                    {
+                        "event": "tokens",
+                        "input": usage[0],
+                        "output": usage[1],
+                        "total": usage[0] + usage[1],
+                        "session": totals["input"] + totals["output"],
+                    }
+                )
+            else:
+                self._emit({"event": "agent", "text": "model finished without reporting token use"})
+            if not edits:
+                self._emit({"event": "error", "text": summary or "model did not change any files"})
+                return None
+            applied = 0
+            for path, content in edits:
+                try:
+                    diff = agent.unified(root, path, content)
+                    agent.write_rel(root, path, content)
+                except ValueError as exc:
+                    self._emit({"event": "log", "text": str(exc)})
+                    continue
+                applied += 1
+                if diff:
+                    self._emit({"event": "diff", "path": path, "text": diff})
+                self._emit({"event": "change", "path": path, "content": content})
+            if applied == 0:
+                self._emit({"event": "error", "text": "model changes could not be applied"})
+                return None
+            self._emit({"event": "log", "text": f"applied {applied} file(s), rebuilding"})
+        return None
+
+    def _gradle(self, root: Path, task: str) -> tuple[int, str]:
+        gradlew = root / "gradlew"
+        proc = subprocess.Popen(
+            [str(gradlew), "--no-daemon", "--no-watch-fs", task],
+            cwd=root,
+            env=os.environ.copy(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        lines: list[str] = []
+        failed: list[BaseException] = []
+
+        def read_output() -> None:
+            assert proc.stdout is not None
+            streamed = 0
+            size = 0
+            try:
+                for line in proc.stdout:
+                    lines.append(line)
+                    size += len(line)
+                    while size > 200_000 and len(lines) > 1:
+                        size -= len(lines.pop(0))
+                    if streamed < 100 and worth_line(line):
+                        streamed += 1
+                        self._emit({"event": "log", "text": line.rstrip()[:400]})
+            except BaseException as exc:
+                failed.append(exc)
+                proc.kill()
+
+        reader = threading.Thread(target=read_output, daemon=True)
+        reader.start()
+        try:
+            code = proc.wait(timeout=TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            reader.join(timeout=5)
+            raise TimeoutError("build timed out")
+        reader.join(timeout=10)
+        if failed:
+            raise failed[0]
+        return code, "".join(lines)
+
+    def _package(self, root: Path, task: str) -> tuple[str, bytes] | None:
+        apks = find_apks(root, task)
+        app_apks = [path for path in apks if path.name in ("app-debug.apk", "app-release.apk")]
+        if len(app_apks) == 1:
+            apks = app_apks
+        if not apks:
+            return None
+        if len(apks) == 1:
+            return apks[0].name, apks[0].read_bytes()
+        packed = io.BytesIO()
+        with zipfile.ZipFile(packed, "w", zipfile.ZIP_DEFLATED) as out:
+            for path in apks:
+                out.write(path, path.name)
+        return "apks.zip", packed.getvalue()
+
+    def _begin_stream(self) -> None:
+        self._write_lock = threading.Lock()
+        self.close_connection = True
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+
+    def _emit(self, obj: dict) -> None:
+        self._chunk((json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+
+    def _raw(self, data: bytes) -> None:
+        step = 64 * 1024
+        for start in range(0, len(data), step):
+            self._chunk(data[start : start + step])
+
+    def _chunk(self, data: bytes) -> None:
+        if not data:
+            return
+        header = f"{len(data):X}\r\n".encode("ascii")
+        with self._write_lock:
+            self.wfile.write(header)
+            self.wfile.write(data)
+            self.wfile.write(b"\r\n")
+            self.wfile.flush()
+
+    def _end_stream(self) -> None:
+        with self._write_lock:
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
 
     def _fail(self, code: int, text: str) -> None:
         self._send(code, text.encode("utf-8", errors="replace"), "text/plain")
