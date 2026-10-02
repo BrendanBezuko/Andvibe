@@ -18,6 +18,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.example.andvibe.databinding.ActivityMainBinding
+import com.example.andvibe.databinding.RowCardBinding
+import com.google.android.material.checkbox.MaterialCheckBox
 import java.io.File
 
 class MainActivity : AppCompatActivity(), UiBridge.Listener {
@@ -30,6 +32,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private var displayed = emptyList<File>()
     private var gitChanges = emptyList<GitOps.Change>()
     private var settingsOpen = false
+    private var boardOpen = false
+    private var workspaceOpen = false
 
     private val openFolder = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode != RESULT_OK) return@registerForActivityResult
@@ -58,6 +62,14 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         override fun handleOnBackPressed() {
             if (settingsOpen) {
                 closeSettings()
+                return
+            }
+            if (boardOpen) {
+                closeBoard()
+                return
+            }
+            if (workspaceOpen) {
+                closeWorkspace()
                 return
             }
             if (AppState.tab == AppState.Tab.GIT && AppState.gitDetail != null) {
@@ -91,6 +103,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         setupVibe()
         setupBuild()
         setupNav()
+        setupUsage()
+        noteRepo()
         val open = AppState.openFile
         if (open != null && open.isFile) openEditor(open) else refreshFileList()
         onLog()
@@ -104,6 +118,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         if (::store.isInitialized) {
             saveProvider(currentProvider)
             saveBuildServer()
+            saveWorkspaceName()
         }
         super.onPause()
     }
@@ -253,6 +268,15 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
     }
 
+    override fun onUsage() {
+        if (!::binding.isInitialized) return
+        val ws = WorkspaceStore.current()
+        binding.openWorkspace.text = ws.name
+        binding.usageTokens.text = (ws.inputTokens + ws.outputTokens).toString()
+        binding.usagePrice.text = WorkspaceStore.priceText(ws.costMicros)
+        if (boardOpen) binding.boardPage.boardScope.text = ws.name
+    }
+
     override fun onProject() {
         saveEditor(announce = false)
         editing = false
@@ -262,6 +286,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         refreshFileList()
         if (AppState.tab == AppState.Tab.GIT) refreshGit()
         if (AppState.tab == AppState.Tab.BUILD) onBuild()
+        noteRepo()
     }
 
     private fun setupSettings() {
@@ -274,6 +299,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun openSettings() {
+        if (boardOpen) closeBoard()
+        if (workspaceOpen) closeWorkspace()
         settingsOpen = true
         binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
         binding.settingsPage.root.visibility = View.VISIBLE
@@ -285,6 +312,254 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         settingsOpen = false
         binding.settingsPage.root.visibility = View.GONE
         syncBack()
+    }
+
+    private fun setupUsage() {
+        binding.openBoard.setOnClickListener {
+            if (boardOpen) closeBoard() else openBoard()
+        }
+        binding.openWorkspace.setOnClickListener {
+            if (workspaceOpen) closeWorkspace() else openWorkspace()
+        }
+        binding.workspacePage.saveWorkspace.setOnClickListener {
+            saveWorkspaceName()
+            onUsage()
+            renderWorkspaces()
+        }
+        binding.workspacePage.newWorkspace.setOnClickListener { promptNewWorkspace() }
+        binding.workspacePage.deleteWorkspace.setOnClickListener { confirmDeleteWorkspace() }
+        binding.boardPage.addIdea.setOnClickListener { editCard(null, WorkspaceStore.Column.IDEA.id) }
+        binding.boardPage.addBug.setOnClickListener { editCard(null, WorkspaceStore.Column.BUG.id) }
+        binding.boardPage.addSolution.setOnClickListener { editCard(null, WorkspaceStore.Column.SOLUTION.id) }
+        onUsage()
+    }
+
+    private fun openBoard() {
+        if (settingsOpen) closeSettings()
+        if (workspaceOpen) closeWorkspace()
+        boardOpen = true
+        renderBoard()
+        binding.boardPage.root.visibility = View.VISIBLE
+        binding.openBoard.setTextColor(getColor(R.color.accent))
+        syncBack()
+    }
+
+    private fun closeBoard() {
+        if (!boardOpen) return
+        boardOpen = false
+        binding.boardPage.root.visibility = View.GONE
+        binding.openBoard.setTextColor(getColor(R.color.ink))
+        syncBack()
+    }
+
+    private fun openWorkspace() {
+        if (settingsOpen) closeSettings()
+        if (boardOpen) closeBoard()
+        workspaceOpen = true
+        renderWorkspace()
+        binding.workspacePage.root.visibility = View.VISIBLE
+        binding.openWorkspace.setTextColor(getColor(R.color.accent))
+        syncBack()
+    }
+
+    private fun closeWorkspace() {
+        if (!workspaceOpen) return
+        saveWorkspaceName()
+        workspaceOpen = false
+        binding.workspacePage.root.visibility = View.GONE
+        binding.openWorkspace.setTextColor(getColor(R.color.ink))
+        onUsage()
+        syncBack()
+    }
+
+    private fun saveWorkspaceName() {
+        if (!workspaceOpen || !::binding.isInitialized) return
+        WorkspaceStore.rename(binding.workspacePage.workspaceName.text?.toString().orEmpty())
+    }
+
+    private fun renderWorkspace() {
+        val ws = WorkspaceStore.current()
+        binding.workspacePage.workspaceName.setText(ws.name)
+        binding.workspacePage.deleteWorkspace.isEnabled = WorkspaceStore.workspaces().size > 1
+        val names = WorkspaceStore.repoNames()
+        binding.workspacePage.repoEmpty.visibility = if (names.isEmpty()) View.VISIBLE else View.GONE
+        val repos = binding.workspacePage.repoList
+        repos.removeAllViews()
+        for (name in names) {
+            val box = MaterialCheckBox(this).apply {
+                text = name
+                isChecked = name in ws.repos
+                setOnCheckedChangeListener { _, checked ->
+                    WorkspaceStore.setRepo(name, checked)
+                }
+            }
+            repos.addView(box)
+        }
+        renderWorkspaces()
+    }
+
+    private fun renderWorkspaces() {
+        val current = WorkspaceStore.current()
+        val list = binding.workspacePage.workspaceList
+        list.removeAllViews()
+        for (ws in WorkspaceStore.workspaces()) {
+            val row = layoutInflater.inflate(R.layout.row_file, list, false) as android.widget.TextView
+            row.text = ws.name
+            row.setTextColor(getColor(if (ws.id == current.id) R.color.accent else R.color.ink))
+            row.setOnClickListener {
+                if (ws.id == current.id) return@setOnClickListener
+                saveWorkspaceName()
+                if (WorkspaceStore.select(ws.id)) {
+                    renderWorkspace()
+                    onUsage()
+                }
+            }
+            list.addView(row)
+        }
+    }
+
+    private fun promptNewWorkspace() {
+        saveWorkspaceName()
+        val input = EditText(this).apply {
+            hint = "Name"
+            setSingleLine(true)
+            setText("Workspace")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("New workspace")
+            .setView(input)
+            .setPositiveButton("Create") { _, _ ->
+                WorkspaceStore.create(input.text.toString())
+                renderWorkspace()
+                onUsage()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun confirmDeleteWorkspace() {
+        val ws = WorkspaceStore.current()
+        if (WorkspaceStore.workspaces().size <= 1) return
+        AlertDialog.Builder(this)
+            .setTitle(ws.name)
+            .setMessage("Delete this workspace and its board.")
+            .setPositiveButton("Delete") { _, _ ->
+                WorkspaceStore.delete(ws.id)
+                renderWorkspace()
+                onUsage()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun renderBoard() {
+        val ws = WorkspaceStore.current()
+        binding.boardPage.boardScope.text = ws.name
+        fillColumn(binding.boardPage.ideaCards, binding.boardPage.ideaEmpty, WorkspaceStore.Column.IDEA)
+        fillColumn(binding.boardPage.bugCards, binding.boardPage.bugEmpty, WorkspaceStore.Column.BUG)
+        fillColumn(binding.boardPage.solutionCards, binding.boardPage.solutionEmpty, WorkspaceStore.Column.SOLUTION)
+    }
+
+    private fun fillColumn(parent: LinearLayout, empty: android.widget.TextView, column: WorkspaceStore.Column) {
+        parent.removeAllViews()
+        val cards = WorkspaceStore.cards(column)
+        empty.visibility = if (cards.isEmpty()) View.VISIBLE else View.GONE
+        for (card in cards) {
+            val row = RowCardBinding.inflate(layoutInflater, parent, false)
+            row.cardTitle.text = card.title
+            if (card.body.isBlank()) {
+                row.cardBody.visibility = View.GONE
+            } else {
+                row.cardBody.visibility = View.VISIBLE
+                row.cardBody.text = card.body
+            }
+            row.root.setOnClickListener { showCardMenu(card) }
+            parent.addView(row.root)
+        }
+    }
+
+    private fun showCardMenu(card: WorkspaceStore.Card) {
+        val labels = mutableListOf("Edit")
+        val actions = mutableListOf<() -> Unit>()
+        actions.add { editCard(card, card.column) }
+        for (column in WorkspaceStore.Column.entries) {
+            if (column.id == card.column) continue
+            labels.add("Move to ${column.label}")
+            actions.add {
+                WorkspaceStore.moveCard(card.id, column.id)
+                renderBoard()
+            }
+        }
+        labels.add("Delete")
+        actions.add {
+            WorkspaceStore.deleteCard(card.id)
+            renderBoard()
+        }
+        AlertDialog.Builder(this)
+            .setTitle(card.title)
+            .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
+            .show()
+    }
+
+    private fun editCard(existing: WorkspaceStore.Card?, column: String) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (20 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        val title = EditText(this).apply {
+            hint = "Title"
+            setSingleLine(true)
+            setText(existing?.title.orEmpty())
+        }
+        val body = EditText(this).apply {
+            hint = "Note"
+            minLines = 3
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setText(existing?.body.orEmpty())
+        }
+        val width = LinearLayout.LayoutParams.MATCH_PARENT
+        val height = LinearLayout.LayoutParams.WRAP_CONTENT
+        layout.addView(title, LinearLayout.LayoutParams(width, height))
+        layout.addView(body, LinearLayout.LayoutParams(width, height))
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(WorkspaceStore.Column.from(column).label)
+            .setView(layout)
+            .setPositiveButton(if (existing == null) "Add" else "Save", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val text = title.text?.toString()?.trim().orEmpty()
+                if (text.isEmpty()) {
+                    title.error = "Add a title"
+                    return@setOnClickListener
+                }
+                val note = body.text?.toString()?.trim().orEmpty()
+                val saved = if (existing == null) {
+                    WorkspaceStore.addCard(column, text, note)
+                } else {
+                    WorkspaceStore.updateCard(existing.id, text, note)
+                    true
+                }
+                if (!saved) {
+                    title.error = "Board is full"
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                renderBoard()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun noteRepo() {
+        val name = runCatching { AppState.projectRoot().name }.getOrNull() ?: return
+        if (!WorkspaceStore.adopt(name)) return
+        onUsage()
+        if (boardOpen) renderBoard()
+        if (workspaceOpen) renderWorkspace()
     }
 
     private fun setupConsole() {
@@ -604,6 +879,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private fun setupNav() {
         binding.bottomNav.setOnItemSelectedListener { item ->
             if (settingsOpen) closeSettings()
+            if (boardOpen) closeBoard()
+            if (workspaceOpen) closeWorkspace()
             val tab = when (item.itemId) {
                 R.id.nav_files -> AppState.Tab.FILES
                 R.id.nav_git -> AppState.Tab.GIT
@@ -623,6 +900,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
         binding.bottomNav.setOnItemReselectedListener {
             if (settingsOpen) closeSettings()
+            if (boardOpen) closeBoard()
+            if (workspaceOpen) closeWorkspace()
         }
         applyTab(AppState.tab)
         val navId = when (AppState.tab) {
@@ -831,7 +1110,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun syncBack() {
-        backCallback.isEnabled = settingsOpen || editing || AppState.gitDetail != null
+        backCallback.isEnabled = settingsOpen || boardOpen || workspaceOpen || editing || AppState.gitDetail != null
     }
 
     private fun pickFolder() {
@@ -884,6 +1163,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         refreshFileList()
         if (AppState.tab == AppState.Tab.GIT) refreshGit()
         AppState.log("opened ${dir.name}")
+        noteRepo()
     }
 
     private fun refreshGit() {

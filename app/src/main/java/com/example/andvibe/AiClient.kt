@@ -49,12 +49,21 @@ object AiClient {
         }
         val prompt = buildPrompt(root, cwd, open, instruction)
         val messages = sanitize(history.toList() + ("user" to prompt))
-        val raw = when (provider) {
+        val reply = when (provider) {
             Provider.ANTHROPIC -> anthropic(baseUrl, key, model, messages)
             Provider.GEMINI -> gemini(baseUrl, key, model, messages)
             else -> openaiCompatible(baseUrl, key, model, messages)
         }
-        val parsed = parse(raw)
+        val charged = if (reply.input == 0L && reply.output == 0L) {
+            reply.copy(
+                input = guessTokens(prompt.length + systemPrompt.length),
+                output = guessTokens(reply.text.length)
+            )
+        } else {
+            reply
+        }
+        WorkspaceStore.addUse(model, charged.input, charged.output)
+        val parsed = parse(reply.text)
         val written = apply(root, parsed.second)
         val summary = parsed.first.ifBlank {
             if (written.isEmpty()) "no file changes" else "updated ${written.size} file(s)"
@@ -248,12 +257,45 @@ object AiClient {
         return out
     }
 
+    private data class Reply(val text: String, val input: Long, val output: Long)
+
+    private fun guessTokens(chars: Int): Long {
+        if (chars <= 0) return 0
+        return (chars / 4L).coerceAtLeast(1)
+    }
+
+    private fun readUse(raw: String): Pair<Long, Long> {
+        return try {
+            val json = JSONObject(raw)
+            val usage = json.optJSONObject("usage")
+            if (usage != null) {
+                val input = when {
+                    usage.has("input_tokens") -> usage.optLong("input_tokens")
+                    else -> usage.optLong("prompt_tokens")
+                }
+                val output = when {
+                    usage.has("output_tokens") -> usage.optLong("output_tokens")
+                    else -> usage.optLong("completion_tokens")
+                }
+                return input.coerceAtLeast(0) to output.coerceAtLeast(0)
+            }
+            val meta = json.optJSONObject("usageMetadata")
+            if (meta != null) {
+                return meta.optLong("promptTokenCount").coerceAtLeast(0) to
+                    meta.optLong("candidatesTokenCount").coerceAtLeast(0)
+            }
+            0L to 0L
+        } catch (_: Exception) {
+            0L to 0L
+        }
+    }
+
     private fun openaiCompatible(
         base: String,
         key: String,
         model: String,
         messages: List<Pair<String, String>>
-    ): String {
+    ): Reply {
         return try {
             chatCompletions(base, key, model, messages)
         } catch (e: IllegalStateException) {
@@ -271,8 +313,8 @@ object AiClient {
         key: String,
         model: String,
         messages: List<Pair<String, String>>
-    ): String {
-        fun once(field: String): String {
+    ): Reply {
+        fun once(field: String): Reply {
             val body = JSONObject()
             body.put("model", model)
             val arr = JSONArray()
@@ -282,7 +324,9 @@ object AiClient {
             }
             body.put("messages", arr)
             body.put(field, 8192)
-            return openAiText(post(chatUrl(base), mapOf("Authorization" to "Bearer $key"), body.toString()))
+            val raw = post(chatUrl(base), mapOf("Authorization" to "Bearer $key"), body.toString())
+            val use = readUse(raw)
+            return Reply(openAiText(raw), use.first, use.second)
         }
         return try {
             once("max_tokens")
@@ -301,7 +345,7 @@ object AiClient {
         key: String,
         model: String,
         messages: List<Pair<String, String>>
-    ): String {
+    ): Reply {
         val body = JSONObject()
         body.put("model", model)
         body.put("instructions", systemPrompt)
@@ -311,10 +355,12 @@ object AiClient {
             input.put(JSONObject().put("role", role).put("content", content))
         }
         body.put("input", input)
-        return responsesText(post(responsesUrl(base), mapOf("Authorization" to "Bearer $key"), body.toString()))
+        val raw = post(responsesUrl(base), mapOf("Authorization" to "Bearer $key"), body.toString())
+        val use = readUse(raw)
+        return Reply(responsesText(raw), use.first, use.second)
     }
 
-    private fun anthropic(base: String, key: String, model: String, messages: List<Pair<String, String>>): String {
+    private fun anthropic(base: String, key: String, model: String, messages: List<Pair<String, String>>): Reply {
         val body = JSONObject()
         body.put("model", model)
         body.put("max_tokens", 8192)
@@ -329,16 +375,17 @@ object AiClient {
             mapOf("x-api-key" to key, "anthropic-version" to "2023-06-01"),
             body.toString()
         )
+        val use = readUse(text)
         val content = JSONObject(text).optJSONArray("content") ?: error("empty response")
         val out = StringBuilder()
         for (i in 0 until content.length()) {
             out.append(content.optJSONObject(i)?.optString("text").orEmpty())
         }
         if (out.isBlank()) error("empty response")
-        return out.toString()
+        return Reply(out.toString(), use.first, use.second)
     }
 
-    private fun gemini(base: String, key: String, model: String, messages: List<Pair<String, String>>): String {
+    private fun gemini(base: String, key: String, model: String, messages: List<Pair<String, String>>): Reply {
         val modelId = model.removePrefix("models/").trim()
         val body = JSONObject()
         body.put(
@@ -356,6 +403,7 @@ object AiClient {
         body.put("contents", contents)
         body.put("generationConfig", JSONObject().put("maxOutputTokens", 8192))
         val text = post(geminiUrl(base, modelId), mapOf("x-goog-api-key" to key), body.toString())
+        val use = readUse(text)
         val json = JSONObject(text)
         val candidates = json.optJSONArray("candidates")
         if (candidates == null || candidates.length() == 0) {
@@ -368,7 +416,7 @@ object AiClient {
             out.append(parts.optJSONObject(i)?.optString("text").orEmpty())
         }
         if (out.isBlank()) error("empty response")
-        return out.toString()
+        return Reply(out.toString(), use.first, use.second)
     }
 
     private fun openAiText(text: String): String {

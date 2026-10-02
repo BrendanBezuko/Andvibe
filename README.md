@@ -154,6 +154,24 @@ curl -fL "https://SERVICE_URL/healthz"
 
 `/healthz` is open. `/build` rejects a missing or wrong bearer token. The service allows unauthenticated HTTP so the phone can call it. The token is what keeps builds private.
 
+Container stdout goes to Cloud Logging. `gcloud run services logs tail` is not in the stable command on this SDK, so the live tail is the beta command. `PROJECT_ID` here is the project id (`marmot-marketing`), not the project number in the service URL.
+
+```bash
+gcloud beta run services logs tail andvibe-build --region us-central1 --project marmot-marketing
+```
+
+A one-shot read is in the stable command:
+
+```bash
+gcloud run services logs read andvibe-build --region us-central1 --project marmot-marketing --limit 80
+```
+
+Source deploy prints a Cloud Build log URL. `gcloud builds log` rejects a project number. Pass the project id and the build id from that URL:
+
+```bash
+gcloud builds log 357a5ca6-b64c-4b3d-b35a-930044e222d6 --region us-central1 --project marmot-marketing
+```
+
 Optional environment variables, comma-separated in `--set-env-vars`:
 
 | Variable | Default | Meaning |

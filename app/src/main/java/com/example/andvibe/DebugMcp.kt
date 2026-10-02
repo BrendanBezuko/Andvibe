@@ -163,7 +163,7 @@ object DebugMcp {
             )))
             .put(tool("build_log", "The Build tab text, including the Cloud Run upload and the APK path.", schema()))
             .put(tool("console_log", "The Console tab text.", schema()))
-            .put(tool("state", "Current project, tab, busy flags, and last APK path. Does not include tokens.", schema()))
+            .put(tool("state", "Current project, tab, busy flags, workspace, and last APK path. Does not include API keys.", schema()))
     }
 
     private fun callTool(params: JSONObject?): JSONObject {
@@ -197,6 +197,12 @@ object DebugMcp {
             append("gitBusy=${AppState.gitBusy}\n")
             append("vibeBusy=${AppState.vibeBusy}\n")
             append("lastApk=${AppState.lastApk.orEmpty()}\n")
+            val ws = WorkspaceStore.current()
+            append("workspace=${ws.name}\n")
+            append("workspaceRepos=${ws.repos.sorted().joinToString(",")}\n")
+            append("usageTokens=${ws.inputTokens + ws.outputTokens}\n")
+            append("usageUsd=${WorkspaceStore.priceText(ws.costMicros)}\n")
+            append("boardCards=${ws.cards.size}\n")
             if (snap != null) {
                 append("gitBranch=${snap.branch}\n")
                 append("gitRepo=${snap.isRepo}\n")

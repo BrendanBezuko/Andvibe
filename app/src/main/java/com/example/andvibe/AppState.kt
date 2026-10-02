@@ -41,6 +41,7 @@ object AppState {
     fun init(context: Context) {
         if (ready) return
         appContext = context.applicationContext
+        WorkspaceStore.init(appContext)
         reposDir = File(appContext.filesDir, "repos").apply { mkdirs() }
         cwd = ProjectStore.restore(appContext, reposDir) ?: reposDir
         log("AndVibe")
@@ -105,6 +106,7 @@ object UiBridge {
         fun onGit()
         fun onProject()
         fun onMcp()
+        fun onUsage()
     }
 
     var listener: Listener? = null
@@ -144,5 +146,9 @@ object UiBridge {
 
     fun mcpUpdate() {
         main.post { listener?.onMcp() }
+    }
+
+    fun usageUpdate() {
+        main.post { listener?.onUsage() }
     }
 }
