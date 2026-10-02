@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """POST a project zip to /build and get an APK back.
 
-The response is chunked application/x-ndjson. Each line is an event.
-Gradle progress, agent status, token use, and changed files stream as
+The response is chunked application/x-ndjson. Gradle lines stream as
 they happen. The apk event names the byte length, and the raw APK
-follows that line. Only files the agent changed are sent back.
+follows that line. This service does not call a model or see an API key.
 
 Cloud Run's request body limit is 32MB. Dependencies are downloaded
 during the Gradle run, so the zip should be source plus the wrapper.
@@ -25,8 +24,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-import agent
-
 PORT = int(os.environ.get("PORT", "8080"))
 TOKEN = os.environ.get("BUILD_TOKEN", "")
 SDK = os.environ.get("ANDROID_HOME", "/opt/android-sdk")
@@ -34,7 +31,6 @@ MAX_ZIP = 32 * 1024 * 1024
 MAX_UNCOMPRESSED = 400 * 1024 * 1024
 MAX_FILES = 8000
 TIMEOUT = int(os.environ.get("BUILD_TIMEOUT", "3000"))
-FIXES = max(0, int(os.environ.get("BUILD_FIXES", "2")))
 BUILD_LOCK = threading.Lock()
 SKIP_PARTS = {".gradle", ".git", "build", ".idea", "__MACOSX"}
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -185,19 +181,17 @@ class Handler(BaseHTTPRequestHandler):
             if b"\r\n" in wrapper[:300]:
                 gradlew.write_bytes(wrapper.replace(b"\r\n", b"\n"))
             (root / "local.properties").write_text(f"sdk.dir={SDK}\n", encoding="utf-8")
-            cfg = agent.config_from(self.headers)
-            print(f"building {task} in {root.name} agent={cfg is not None}", flush=True)
+            print(f"building {task} in {root.name}", flush=True)
             self._begin_stream()
             streaming = True
-            summary = self._compile(root, task, cfg)
-            if summary is None:
+            if not self._compile(root, task):
                 return
             packed = self._package(root, task)
             if packed is None:
                 self._emit({"event": "error", "text": "gradle finished but no APK was produced"})
                 return
             name, body = packed
-            self._emit({"event": "apk", "name": name, "bytes": len(body), "summary": summary})
+            self._emit({"event": "apk", "name": name, "bytes": len(body)})
             self._raw(body)
         except Exception as exc:
             print(f"build error {exc}", flush=True)
@@ -218,70 +212,22 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.rmtree(work, ignore_errors=True)
             BUILD_LOCK.release()
 
-    def _compile(self, root: Path, task: str, cfg: dict | None) -> str | None:
-        summary = ""
-        totals = {"input": 0, "output": 0}
-        attempts = FIXES + 1 if cfg else 1
-        for attempt in range(attempts):
-            label = f"gradle {task}" if attempt == 0 else f"gradle {task} (try {attempt + 1})"
-            self._emit({"event": "log", "text": label})
-            try:
-                code, log = self._gradle(root, task)
-            except TimeoutError:
-                self._emit({"event": "error", "text": "build timed out"})
-                return None
-            print(log[-4000:], flush=True)
-            if code == 0:
-                self._emit({"event": "log", "text": "BUILD SUCCESSFUL"})
-                return summary
-            self._emit({"event": "log", "text": "gradle failed"})
-            if cfg is None or attempt == attempts - 1:
-                tail = (log[-2000:] or "gradle failed").strip()
-                why = "still failing after auto-fix" if cfg else "gradle failed, and no Vibe API key was sent to auto-fix it"
-                self._emit({"event": "error", "text": why + "\n" + tail})
-                return None
-            self._emit({"event": "agent", "text": f"asking {cfg['model']} to fix the compile error"})
-            try:
-                summary, edits, usage = agent.repair(root, log, cfg, self._emit)
-            except Exception as exc:
-                self._emit({"event": "error", "text": f"agent failed: {exc}"})
-                return None
-            if usage:
-                totals["input"] += usage[0]
-                totals["output"] += usage[1]
-                self._emit(
-                    {
-                        "event": "tokens",
-                        "input": usage[0],
-                        "output": usage[1],
-                        "total": usage[0] + usage[1],
-                        "session": totals["input"] + totals["output"],
-                    }
-                )
-            else:
-                self._emit({"event": "agent", "text": "model finished without reporting token use"})
-            if not edits:
-                self._emit({"event": "error", "text": summary or "model did not change any files"})
-                return None
-            applied = 0
-            for path, content in edits:
-                try:
-                    diff = agent.unified(root, path, content)
-                    if not diff:
-                        self._emit({"event": "log", "text": f"{path} unchanged"})
-                        continue
-                    agent.write_rel(root, path, content)
-                except ValueError as exc:
-                    self._emit({"event": "log", "text": str(exc)})
-                    continue
-                applied += 1
-                self._emit({"event": "diff", "path": path, "text": diff})
-                self._emit({"event": "change", "path": path, "content": content})
-            if applied == 0:
-                self._emit({"event": "error", "text": "model changes could not be applied"})
-                return None
-            self._emit({"event": "log", "text": f"applied {applied} file(s), rebuilding"})
-        return None
+    def _compile(self, root: Path, task: str) -> bool:
+        self._emit({"event": "log", "text": f"gradle {task}"})
+        try:
+            code, log = self._gradle(root, task)
+        except TimeoutError:
+            self._emit({"event": "error", "text": "build timed out"})
+            return False
+        print(log[-4000:], flush=True)
+        if code == 0:
+            self._emit({"event": "log", "text": "BUILD SUCCESSFUL"})
+            return True
+        tail = (log[-8000:] or "gradle failed").strip()
+        if tail:
+            self._emit({"event": "log", "text": tail})
+        self._emit({"event": "error", "text": "gradle failed"})
+        return False
 
     def _gradle(self, root: Path, task: str) -> tuple[int, str]:
         gradlew = root / "gradlew"

@@ -24,6 +24,7 @@ object AppState {
     var writtenPaths: List<String> = emptyList()
 
     @Volatile var buildBusy = false
+    @Volatile var reviseBusy = false
     var lastApk: String? = null
 
     @Volatile var gitBusy = false

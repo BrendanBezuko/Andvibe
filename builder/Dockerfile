@@ -27,13 +27,14 @@ RUN yes | sdkmanager --licenses \
         "build-tools;37.0.0" \
         "build-tools;36.0.0" \
         "platform-tools" \
-    && chmod -R a+rX ${ANDROID_HOME}
+        "ndk;28.0.13004108"
 
+# Gradle runs as builder and may install more SDK packages, so this tree has to be writable.
 RUN useradd --create-home --shell /usr/sbin/nologin builder \
     && mkdir -p /home/builder/work \
-    && chown -R builder:builder /home/builder
+    && chown -R builder:builder /home/builder ${ANDROID_HOME}
 
-COPY server.py agent.py /opt/
+COPY server.py /opt/server.py
 
 USER builder
 WORKDIR /home/builder

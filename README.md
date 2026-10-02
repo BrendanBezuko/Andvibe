@@ -60,7 +60,7 @@ The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or
 
 **Account** stores the git name, email, and an HTTPS token with the other secrets. GitHub wants a personal access token, not the account password.
 
-Each Vibe chat commits the files it changed, using your message as the subject. A Cloud Run auto-fix does the same when the rebuild succeeds, using the model's summary.
+Each Vibe chat commits the files it changed, using your message as the subject. **Revise** on the Build tab does the same after it edits the project from the build log.
 
 ## Vibe
 
@@ -73,7 +73,7 @@ Pick OpenAI, Anthropic, Gemini, Grok, or Custom. Paste an API key. The model and
 | Gemini | `gemini-3.8-flash` | `https://generativelanguage.googleapis.com/v1beta` |
 | Grok | `grok-4.6` | `https://api.x.ai/v1` |
 
-Keys stay in encrypted app storage. The same key, model, and base URL are sent with a Cloud Run build so a failed compile can be fixed there. Cloud Run uses them for that request and does not store them. With no key saved, the build still runs and a failure is reported without an auto-fix.
+Keys stay in encrypted app storage on the phone. A build upload does not include them. **Revise** on the Build tab is what calls the model, and that call goes from the phone straight to the provider.
 
 ## Build on the phone
 
@@ -116,7 +116,35 @@ gcloud run deploy andvibe-build \
   --set-env-vars "BUILD_TOKEN=${BUILD_TOKEN}"
 ```
 
-The first deploy is slow because the image downloads the SDK. Source deploy also builds with Cloud Build. Redeploy the same command after a builder change, with the existing `BUILD_TOKEN` exported instead of a new one.
+The first deploy is slow because the image downloads the SDK. Source deploy also builds with Cloud Build. The URL stays the same on later deploys.
+
+### Update the builder
+
+Run this from the repo after a change under `builder/`. Leave off `--set-env-vars` so the `BUILD_TOKEN` already on the service stays. Do not generate a new token.
+
+```bash
+cd /Users/b/Projects/Andvibe
+
+gcloud run deploy andvibe-build \
+  --source builder \
+  --region us-central1 \
+  --memory 8Gi \
+  --cpu 4 \
+  --timeout 3600 \
+  --concurrency 1 \
+  --max-instances 1 \
+  --min-instances 0 \
+  --cpu-boost \
+  --allow-unauthenticated
+```
+
+Install the matching app build too. This service streams events and then the APK. An older AndVibe build expects a raw APK.
+
+```bash
+./gradlew :app:installDebug
+```
+
+The model API key stays on the phone. Do not put it in Secret Manager or in the Cloud Run environment. `BUILD_TOKEN` is only the bearer token that guards `/build`.
 
 Check that the service is up:
 
@@ -132,11 +160,6 @@ Optional environment variables, comma-separated in `--set-env-vars`:
 | --- | --- | --- |
 | `BUILD_TOKEN` | empty | Bearer token required by `/build`. Empty rejects every build. |
 | `BUILD_TIMEOUT` | `3000` | Seconds for one Gradle run. |
-| `BUILD_FIXES` | `2` | How many times the model may edit the project after a failure. |
-| `AGENT_API_KEY` | empty | Fallback model key if the phone does not send one. |
-| `AGENT_MODEL` | empty | Fallback model name. |
-| `AGENT_BASE` | empty | Fallback API base URL. |
-| `AGENT_PROVIDER` | `openai` | `openai`, `anthropic`, `gemini`, `grok`, or `custom`. |
 
 The Cloud Run request itself ends at 60 minutes (`--timeout 3600`). The phone stops waiting at 55 minutes. Leave AndVibe open until the APK path appears.
 
@@ -173,19 +196,11 @@ cd /Users/b/Projects/Andvibe
 
 Open a project that contains `gradlew`. On the Build tab, paste the service URL (`https://….run.app`, no path) and the build token, then press **Build APK**.
 
-The phone zips the project and posts it to `/build?task=assembleDebug`. Progress is streamed to the Console and the Build log.
+The phone zips the project and posts it to `/build?task=assembleDebug`. Gradle lines stream to the Console and the Build log as they happen. The zip does not contain the model API key.
 
 If Gradle succeeds, the APK comes back and **Install** opens the system installer.
 
-If Gradle fails and a Vibe key is saved, Cloud Run asks that model to fix the compile error, up to `BUILD_FIXES` times (two by default):
-
-- Gradle task lines and errors stream as they happen.
-- The console shows when the model is writing, then the summary.
-- Token use arrives as a line like `tokens 1200 in, 340 out · session 1540`. Providers that omit usage say so.
-- The diff is streamed, and only the changed files are written on the phone.
-- Cloud Run rebuilds. A successful rebuild commits those files locally. The APK still downloads so you can install it.
-
-The model cannot change `gradlew`, `local.properties`, keystores, or archives. A build that succeeds the first time skips the model.
+If Gradle fails, the failure stays in the log. Tap **Revise**. That reads the log, calls the model with the key saved on the Vibe tab, writes the edited files on the phone, and commits them. Then tap **Build APK** again. Revise does nothing until a build log exists, and it asks for a Vibe key if none is saved.
 
 Deploy the new builder and install the new app together. The response is an event stream followed by the APK bytes. An older app expects a raw APK and will not understand this service.
 
