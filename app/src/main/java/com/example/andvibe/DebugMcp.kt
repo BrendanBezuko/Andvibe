@@ -7,27 +7,74 @@ import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 object DebugMcp {
     const val PORT = 8765
     private val started = AtomicBoolean(false)
 
+    @Volatile
+    private var listening = false
+
+    @Volatile
+    private var failure: String? = null
+
+    @Volatile
+    private var lastRequestAt = 0L
+
+    fun statusText(): String {
+        val fail = failure
+        val inUse = fail?.contains("EADDRINUSE") == true || fail?.contains("Address already in use") == true
+        val head = when {
+            listening -> "Listening on 127.0.0.1:$PORT"
+            inUse -> "Not listening. Port $PORT is already in use on this device."
+            !fail.isNullOrBlank() -> "Not listening. $fail"
+            else -> "Starting"
+        }
+        val seen = lastRequestAt
+        val whenLine = if (seen == 0L) {
+            "No request yet"
+        } else {
+            val fmt = SimpleDateFormat("HH:mm:ss", Locale.US)
+            "Last request ${fmt.format(Date(seen))}"
+        }
+        val forward = "adb forward tcp:$PORT tcp:$PORT"
+        val command = if (inUse) {
+            "adb reverse --remove tcp:$PORT\n$forward"
+        } else {
+            forward
+        }
+        return "$head\n$whenLine\n$command"
+    }
+
     fun start() {
         if (!started.compareAndSet(false, true)) return
         Thread({
             try {
                 val server = ServerSocket(PORT, 20, InetAddress.getByName("127.0.0.1"))
+                listening = true
+                failure = null
                 DebugLog.step("mcp", "listening on 127.0.0.1:$PORT")
+                publish()
                 while (true) {
                     val socket = server.accept()
                     Thread({ handle(socket) }, "andvibe-mcp-conn").apply { isDaemon = true }.start()
                 }
             } catch (t: Throwable) {
+                listening = false
+                failure = t.message ?: t.javaClass.simpleName
                 started.set(false)
-                DebugLog.step("mcp", "listen failed: ${t.message ?: t.javaClass.simpleName}")
+                DebugLog.step("mcp", "listen failed: ${failure}")
+                publish()
             }
         }, "andvibe-mcp").apply { isDaemon = true }.start()
+    }
+
+    private fun publish() {
+        UiBridge.mcpUpdate()
     }
 
     private fun handle(socket: Socket) {
@@ -35,6 +82,8 @@ object DebugMcp {
         try {
             val input = socket.getInputStream()
             val request = readRequest(input) ?: return
+            lastRequestAt = System.currentTimeMillis()
+            publish()
             if (request.path.substringBefore('?') != "/mcp") {
                 writeResponse(socket, 404, "application/json", """{"error":"not found"}""")
                 return
@@ -135,11 +184,12 @@ object DebugMcp {
     }
 
     private fun stateText(): String {
-        if (!AppState.isReady()) return "ready=false\nmcp=127.0.0.1:$PORT"
+        if (!AppState.isReady()) return "ready=false\nmcp=127.0.0.1:$PORT\nmcpListening=$listening"
         val snap = AppState.gitSnapshot
         return buildString {
             append("ready=true\n")
             append("mcp=127.0.0.1:$PORT\n")
+            append("mcpListening=$listening\n")
             append("tab=${AppState.tab}\n")
             append("cwd=${AppState.cwd.absolutePath}\n")
             append("open=${AppState.openFile?.absolutePath.orEmpty()}\n")

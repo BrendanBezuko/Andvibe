@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private var editing = false
     private var displayed = emptyList<File>()
     private var gitChanges = emptyList<GitOps.Change>()
+    private var settingsOpen = false
 
     private val openFolder = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode != RESULT_OK) return@registerForActivityResult
@@ -55,6 +56,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
+            if (settingsOpen) {
+                closeSettings()
+                return
+            }
             if (AppState.tab == AppState.Tab.GIT && AppState.gitDetail != null) {
                 closeGitDetail()
                 return
@@ -80,6 +85,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             AppState.log("API keys could not be encrypted on this device. They stay in app-private storage.")
         }
         setupConsole()
+        setupSettings()
         setupFiles()
         setupGit()
         setupVibe()
@@ -239,6 +245,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         syncBack()
     }
 
+    override fun onMcp() {
+        if (!::binding.isInitialized) return
+        binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+    }
+
     override fun onProject() {
         saveEditor(announce = false)
         editing = false
@@ -248,6 +259,29 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         refreshFileList()
         if (AppState.tab == AppState.Tab.GIT) refreshGit()
         if (AppState.tab == AppState.Tab.BUILD) onBuild()
+    }
+
+    private fun setupSettings() {
+        binding.consolePage.openSettings.setOnClickListener { openSettings() }
+        binding.settingsPage.mcpRetry.setOnClickListener {
+            DebugMcp.start()
+            binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+        }
+        binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+    }
+
+    private fun openSettings() {
+        settingsOpen = true
+        binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+        binding.settingsPage.root.visibility = View.VISIBLE
+        syncBack()
+    }
+
+    private fun closeSettings() {
+        if (!settingsOpen) return
+        settingsOpen = false
+        binding.settingsPage.root.visibility = View.GONE
+        syncBack()
     }
 
     private fun setupConsole() {
@@ -490,6 +524,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun setupNav() {
         binding.bottomNav.setOnItemSelectedListener { item ->
+            if (settingsOpen) closeSettings()
             val tab = when (item.itemId) {
                 R.id.nav_files -> AppState.Tab.FILES
                 R.id.nav_git -> AppState.Tab.GIT
@@ -506,6 +541,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 else -> Unit
             }
             true
+        }
+        binding.bottomNav.setOnItemReselectedListener {
+            if (settingsOpen) closeSettings()
         }
         applyTab(AppState.tab)
         val navId = when (AppState.tab) {
@@ -704,7 +742,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun syncBack() {
-        backCallback.isEnabled = editing || AppState.gitDetail != null
+        backCallback.isEnabled = settingsOpen || editing || AppState.gitDetail != null
     }
 
     private fun pickFolder() {

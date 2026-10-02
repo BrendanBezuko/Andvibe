@@ -103,6 +103,7 @@ object UiBridge {
         fun onBuild()
         fun onGit()
         fun onProject()
+        fun onMcp()
     }
 
     var listener: Listener? = null
@@ -138,5 +139,9 @@ object UiBridge {
 
     fun projectChanged() {
         main.post { listener?.onProject() }
+    }
+
+    fun mcpUpdate() {
+        main.post { listener?.onMcp() }
     }
 }
