@@ -43,6 +43,34 @@ class SecretStore(context: Context) {
         prefs.edit().putBoolean("auto", value).apply()
     }
 
+    fun gitName(): String = prefs.getString("git_name", "") ?: ""
+
+    fun gitEmail(): String = prefs.getString("git_email", "") ?: ""
+
+    fun gitUser(): String = prefs.getString("git_user", "") ?: ""
+
+    fun gitToken(): String = prefs.getString("git_token", "") ?: ""
+
+    fun saveGit(name: String, email: String, user: String, token: String) {
+        prefs.edit()
+            .putString("git_name", name)
+            .putString("git_email", email)
+            .putString("git_user", user)
+            .putString("git_token", token)
+            .apply()
+    }
+
+    fun buildUrl(): String = prefs.getString("build_url", "") ?: ""
+
+    fun buildToken(): String = prefs.getString("build_token", "") ?: ""
+
+    fun saveBuild(url: String, token: String) {
+        prefs.edit()
+            .putString("build_url", url)
+            .putString("build_token", token)
+            .apply()
+    }
+
     @Suppress("DEPRECATION")
     private fun createEncrypted(context: Context): SharedPreferences? {
         return try {

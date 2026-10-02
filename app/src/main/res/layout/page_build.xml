@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/projectLine"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="No repo yet"
+        android:textColor="@color/ink"
+        android:textSize="14sp" />
+
+    <EditText
+        android:id="@+id/buildUrl"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@color/panel"
+        android:hint="https://….run.app"
+        android:importantForAutofill="no"
+        android:inputType="textUri"
+        android:padding="10dp"
+        android:singleLine="true"
+        android:textColor="@color/ink"
+        android:textColorHint="@color/muted"
+        android:textSize="14sp" />
+
+    <EditText
+        android:id="@+id/buildToken"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@color/panel"
+        android:hint="Build token"
+        android:importantForAutofill="no"
+        android:inputType="textPassword"
+        android:padding="10dp"
+        android:singleLine="true"
+        android:textColor="@color/ink"
+        android:textColorHint="@color/muted"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/apkPath"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:fontFamily="monospace"
+        android:text="No APK yet"
+        android:textColor="@color/muted"
+        android:textIsSelectable="true"
+        android:textSize="12sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/buildApk"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Build APK" />
+
+        <Button
+            android:id="@+id/installApk"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:enabled="false"
+            android:text="Install" />
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/buildScroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <TextView
+            android:id="@+id/buildLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:lineSpacingExtra="2dp"
+            android:text="Paste the Cloud Run URL and token. Build APK uploads a Gradle project and waits for the APK."
+            android:textColor="@color/ink"
+            android:textIsSelectable="true"
+            android:textSize="13sp" />
+    </ScrollView>
+</LinearLayout>

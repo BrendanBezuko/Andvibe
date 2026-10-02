@@ -7,10 +7,12 @@ espressoCore = "3.7.0"
 appcompat = "1.7.1"
 material = "1.14.0"
 security = "1.0.0"
-jgit = "5.13.2.202306221912-r"
+jgit = "6.8.0.202311291450-r"
 slf4j = "1.7.36"
 rhino = "1.7.15"
 desugar = "2.1.5"
+apksig = "8.7.3"
+spongycastle = "1.58.0.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -24,6 +26,10 @@ jgit = { group = "org.eclipse.jgit", name = "org.eclipse.jgit", version.ref = "j
 slf4j-nop = { group = "org.slf4j", name = "slf4j-nop", version.ref = "slf4j" }
 rhino = { group = "org.mozilla", name = "rhino", version.ref = "rhino" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugar" }
+apksig = { group = "com.android.tools.build", name = "apksig", version.ref = "apksig" }
+spongycastle-core = { group = "com.madgag.spongycastle", name = "core", version.ref = "spongycastle" }
+spongycastle-prov = { group = "com.madgag.spongycastle", name = "prov", version.ref = "spongycastle" }
+spongycastle-pkix = { group = "com.madgag.spongycastle", name = "bcpkix-jdk15on", version.ref = "spongycastle" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

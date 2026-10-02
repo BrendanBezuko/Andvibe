@@ -26,8 +26,22 @@
             android:visibility="gone" />
 
         <include
+            android:id="@+id/gitPage"
+            layout="@layout/page_git"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <include
             android:id="@+id/vibePage"
             layout="@layout/page_vibe"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <include
+            android:id="@+id/buildPage"
+            layout="@layout/page_build"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone" />

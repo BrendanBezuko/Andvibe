@@ -59,30 +59,9 @@ object GitClient {
         }
     }
 
-    fun status(start: File, repos: File): String {
-        val dir = RepoFiles.gitRoot(start, repos)
-            ?: return "no .git directory. Snapshot downloads cannot status or pull."
-        return try {
-            prepare()
-            Git.open(dir).use { git -> formatStatus(git) }
-        } catch (t: Throwable) {
-            "git status failed: ${t.message ?: t.javaClass.simpleName}"
-        }
-    }
+    fun status(start: File, repos: File): String = GitOps.status(start, repos)
 
-    fun pull(start: File, repos: File): String {
-        val dir = RepoFiles.gitRoot(start, repos)
-            ?: return "no .git directory. Snapshot downloads cannot pull. Clone again for a fresh copy."
-        return try {
-            prepare()
-            Git.open(dir).use { git ->
-                val result = git.pull().call()
-                if (result.isSuccessful) "pull ok" else "pull failed"
-            }
-        } catch (t: Throwable) {
-            "pull failed: ${t.message ?: t.javaClass.simpleName}"
-        }
-    }
+    fun pull(start: File, repos: File): String = GitOps.pull(start, repos)
 
     private fun tryJgit(url: String, dest: File, log: (String) -> Unit) {
         try {
@@ -132,28 +111,6 @@ object GitClient {
             current = current.cause
         }
         return false
-    }
-
-    private fun formatStatus(git: Git): String {
-        val status = git.status().call()
-        val branch = git.repository.branch ?: "HEAD"
-        if (status.isClean) return "on $branch\nclean"
-        return buildString {
-            append("on ").append(branch).append('\n')
-            appendSet("added", status.added)
-            appendSet("changed", status.changed)
-            appendSet("modified", status.modified)
-            appendSet("removed", status.removed)
-            appendSet("missing", status.missing)
-            appendSet("untracked", status.untracked)
-        }.trimEnd()
-    }
-
-    private fun StringBuilder.appendSet(title: String, paths: Set<String>) {
-        if (paths.isEmpty()) return
-        append(title).append('\n')
-        paths.take(30).forEach { append("  ").append(it).append('\n') }
-        if (paths.size > 30) append("  …\n")
     }
 
     private fun downloadSnapshot(url: String, dest: File, log: (String) -> Unit) {

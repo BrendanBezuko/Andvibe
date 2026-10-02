@@ -8,11 +8,12 @@ import java.util.ArrayDeque
 import java.util.concurrent.Executors
 
 object AppState {
-    enum class Tab { CONSOLE, FILES, VIBE }
+    enum class Tab { CONSOLE, FILES, GIT, VIBE, BUILD }
 
     val io = Executors.newSingleThreadExecutor()
     val history = ArrayDeque<Pair<String, String>>()
 
+    lateinit var appContext: Context
     lateinit var reposDir: File
     @Volatile var cwd: File = File(".")
     @Volatile var openFile: File? = null
@@ -22,16 +23,30 @@ object AppState {
     var vibeResult = ""
     var writtenPaths: List<String> = emptyList()
 
+    @Volatile var buildBusy = false
+    var lastApk: String? = null
+
+    @Volatile var gitBusy = false
+    var gitSnapshot: GitOps.Snapshot? = null
+    var gitDetail: String? = null
+    var gitMessageClear = false
+
     private val logBuffer = StringBuilder()
+    private val buildBuffer = StringBuilder()
     private var ready = false
 
     fun init(context: Context) {
         if (ready) return
-        reposDir = File(context.applicationContext.filesDir, "repos").apply { mkdirs() }
-        cwd = reposDir
+        appContext = context.applicationContext
+        reposDir = File(appContext.filesDir, "repos").apply { mkdirs() }
+        cwd = ProjectStore.restore(appContext, reposDir) ?: reposDir
         log("AndVibe")
         log("Type help")
-        log("git clone https://github.com/user/repo")
+        if (cwd.canonicalFile == reposDir.canonicalFile) {
+            log("git clone https://github.com/user/repo")
+        } else {
+            log("opened ${RepoFiles.display(cwd, reposDir)}")
+        }
         ready = true
     }
 
@@ -52,6 +67,24 @@ object AppState {
         synchronized(logBuffer) { logBuffer.setLength(0) }
         UiBridge.updateLog()
     }
+
+    fun buildText(): String = synchronized(buildBuffer) { buildBuffer.toString() }
+
+    fun clearBuild() {
+        synchronized(buildBuffer) { buildBuffer.setLength(0) }
+        UiBridge.buildUpdate()
+    }
+
+    fun buildLog(line: String) {
+        val text = line.trimEnd()
+        synchronized(buildBuffer) {
+            buildBuffer.append(text).append('\n')
+            if (buildBuffer.length > 120_000) {
+                buildBuffer.delete(0, buildBuffer.length - 80_000)
+            }
+        }
+        UiBridge.buildUpdate()
+    }
 }
 
 object UiBridge {
@@ -61,6 +94,9 @@ object UiBridge {
         fun onOpen(file: File)
         fun onPreview(file: File)
         fun onVibe()
+        fun onBuild()
+        fun onGit()
+        fun onProject()
     }
 
     var listener: Listener? = null
@@ -84,5 +120,17 @@ object UiBridge {
 
     fun vibeUpdate() {
         main.post { listener?.onVibe() }
+    }
+
+    fun buildUpdate() {
+        main.post { listener?.onBuild() }
+    }
+
+    fun gitUpdate() {
+        main.post { listener?.onGit() }
+    }
+
+    fun projectChanged() {
+        main.post { listener?.onProject() }
     }
 }

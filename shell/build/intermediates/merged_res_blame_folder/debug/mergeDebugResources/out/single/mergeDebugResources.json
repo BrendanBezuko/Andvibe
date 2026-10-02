@@ -1,0 +1,6 @@
+[
+    {
+        "merged": "com.andvibe.built.shell-debug-3:/drawable_ic_shell.xml.flat",
+        "source": "com.andvibe.built.shell-main-5:/drawable/ic_shell.xml"
+    }
+]

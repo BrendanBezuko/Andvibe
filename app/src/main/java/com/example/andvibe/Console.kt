@@ -9,17 +9,26 @@ AndVibe
   clear                        clear the screen
   pwd    ls [path]    cd [path]
   cat <file>    open <file>
+  projects                     folders already in AndVibe
   git clone <https-url> [dir]
-  git status    git pull
+  git status | add <file> | add .
+  git commit -m "message"
+  git push | pull | fetch | log
+  git diff [file] | branch
+  git checkout <branch>
+  git checkout -b <name>
+  git restore <file> | init
+  git remote | git remote add origin <url>
   compile                      syntax-check JavaScript
   test                         run *.test.js and test/
   run [file]                   preview HTML or run JS
 
-Clone a public repo, edit it on the Vibe tab with your own API key,
-then compile / test / run here.
+Open an older folder from Files, or clone a public repo.
+The Git tab stages, commits, and pushes. Edit on Vibe, then Build.
+A project with gradlew uploads to Cloud Run. Other projects pack on the phone.
 
 JavaScript can use relative require("./file") and assert.equal.
-npm, Python, Java, Kotlin, Gradle, Rust, and Go do not build on the phone.
+npm, Python, Rust, and Go do not build here.
 HTML projects open in a preview.
 """
 
@@ -35,6 +44,7 @@ HTML projects open in a preview.
             "cd" -> cd(args)
             "cat" -> cat(args)
             "open" -> open(args)
+            "projects" -> projects()
             "git" -> git(args)
             "compile" -> AppState.log(JsRunner.compile(AppState.projectRoot()))
             "test" -> AppState.log(JsRunner.test(AppState.projectRoot()))
@@ -90,6 +100,9 @@ HTML projects open in a preview.
         }
         if (!dir.isDirectory) error("not a directory")
         AppState.cwd = dir
+        if (dir.canonicalFile != AppState.reposDir.canonicalFile) {
+            ProjectStore.remember(AppState.appContext, dir)
+        }
         UiBridge.filesChanged()
         AppState.log(RepoFiles.display(dir, AppState.reposDir))
     }
@@ -110,25 +123,78 @@ HTML projects open in a preview.
         UiBridge.open(file)
     }
 
+    private fun projects() {
+        val dirs = AppState.reposDir.listFiles()
+            ?.filter { it.isDirectory && !it.name.startsWith(".") }
+            ?.sortedBy { it.name.lowercase() }
+            .orEmpty()
+        if (dirs.isEmpty()) AppState.log("no projects. git clone, or Open a folder on the Files tab")
+        else dirs.forEach { AppState.log(it.name + "/") }
+    }
+
     private fun git(args: List<String>) {
         if (args.isEmpty()) {
-            AppState.log("git clone <url> [dir] | git status | git pull")
+            AppState.log("git status, add, commit -m, push, pull, fetch, log, diff, branch, checkout, init")
             return
         }
+        val cwd = AppState.cwd
+        val repos = AppState.reposDir
         when (args[0]) {
             "clone" -> {
                 if (args.size < 2 || args.size > 3) error("usage: git clone <url> [dir]")
                 val url = GitClient.normalizeGitUrl(args[1])
                 val name = if (args.size == 3) GitClient.safeRepoName(args[2]) else GitClient.repoNameFromUrl(url)
-                val dest = File(AppState.reposDir, name)
+                val dest = File(repos, name)
                 GitClient.clone(url, dest, AppState::log)
                 AppState.cwd = dest.canonicalFile
+                ProjectStore.remember(AppState.appContext, AppState.cwd)
                 UiBridge.filesChanged()
-                AppState.log("now in ${RepoFiles.display(AppState.cwd, AppState.reposDir)}")
+                AppState.log("now in ${RepoFiles.display(AppState.cwd, repos)}")
             }
-            "status" -> AppState.log(GitClient.status(AppState.cwd, AppState.reposDir))
-            "pull" -> AppState.log(GitClient.pull(AppState.cwd, AppState.reposDir))
-            else -> AppState.log("unknown git command. try: clone, status, pull")
+            "status" -> AppState.log(GitOps.status(cwd, repos))
+            "add" -> {
+                if (args.size != 2) error("usage: git add <file> | git add .")
+                AppState.log(GitOps.stage(cwd, repos, args[1]))
+                UiBridge.filesChanged()
+            }
+            "reset" -> {
+                if (args.size != 2) error("usage: git reset <file>")
+                AppState.log(GitOps.unstage(cwd, repos, args[1]))
+            }
+            "restore" -> {
+                if (args.size != 2) error("usage: git restore <file>")
+                AppState.log(GitOps.discard(cwd, repos, args[1]))
+                UiBridge.filesChanged()
+            }
+            "commit" -> {
+                val message = when {
+                    args.size >= 3 && args[1] == "-m" -> args.drop(2).joinToString(" ")
+                    args.size >= 2 -> args.drop(1).joinToString(" ")
+                    else -> error("usage: git commit -m \"message\"")
+                }
+                AppState.log(GitOps.commit(cwd, repos, message))
+            }
+            "push" -> AppState.log(GitOps.push(cwd, repos))
+            "pull" -> AppState.log(GitOps.pull(cwd, repos))
+            "fetch" -> AppState.log(GitOps.fetch(cwd, repos))
+            "log" -> AppState.log(GitOps.history(cwd, repos))
+            "diff" -> AppState.log(GitOps.diff(cwd, repos, args.getOrNull(1), staged = false))
+            "branch" -> AppState.log(GitOps.branchReport(cwd, repos))
+            "checkout", "switch" -> {
+                when {
+                    args.size == 3 && args[1] == "-b" -> AppState.log(GitOps.createBranch(cwd, repos, args[2]))
+                    args.size == 2 -> AppState.log(GitOps.checkout(cwd, repos, args[1]))
+                    else -> error("usage: git checkout <branch> | git checkout -b <name>")
+                }
+                UiBridge.filesChanged()
+            }
+            "init" -> AppState.log(GitOps.init(AppState.projectRoot()))
+            "remote" -> {
+                if (args.size == 1) AppState.log(GitOps.remoteSummary(cwd, repos))
+                else if (args.size == 4 && args[1] == "add") AppState.log(GitOps.addRemote(cwd, repos, args[2], args[3]))
+                else error("usage: git remote | git remote add <name> <url>")
+            }
+            else -> AppState.log("unknown git command. try help")
         }
     }
 

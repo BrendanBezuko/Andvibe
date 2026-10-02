@@ -9,7 +9,15 @@
         android:icon="@drawable/ic_nav_files"
         android:title="Files" />
     <item
+        android:id="@+id/nav_git"
+        android:icon="@drawable/ic_nav_git"
+        android:title="Git" />
+    <item
         android:id="@+id/nav_vibe"
         android:icon="@drawable/ic_nav_vibe"
         android:title="Vibe" />
+    <item
+        android:id="@+id/nav_build"
+        android:icon="@drawable/ic_nav_build"
+        android:title="Build" />
 </menu>
