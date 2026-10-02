@@ -13,6 +13,7 @@ during the Gradle run, so the zip should be source plus the wrapper.
 import io
 import json
 import os
+import re
 import secrets
 import shutil
 import stat
@@ -36,6 +37,7 @@ TIMEOUT = int(os.environ.get("BUILD_TIMEOUT", "3000"))
 FIXES = max(0, int(os.environ.get("BUILD_FIXES", "2")))
 BUILD_LOCK = threading.Lock()
 SKIP_PARTS = {".gradle", ".git", "build", ".idea", "__MACOSX"}
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def authorized(header: str) -> bool:
@@ -265,13 +267,15 @@ class Handler(BaseHTTPRequestHandler):
             for path, content in edits:
                 try:
                     diff = agent.unified(root, path, content)
+                    if not diff:
+                        self._emit({"event": "log", "text": f"{path} unchanged"})
+                        continue
                     agent.write_rel(root, path, content)
                 except ValueError as exc:
                     self._emit({"event": "log", "text": str(exc)})
                     continue
                 applied += 1
-                if diff:
-                    self._emit({"event": "diff", "path": path, "text": diff})
+                self._emit({"event": "diff", "path": path, "text": diff})
                 self._emit({"event": "change", "path": path, "content": content})
             if applied == 0:
                 self._emit({"event": "error", "text": "model changes could not be applied"})
@@ -299,6 +303,7 @@ class Handler(BaseHTTPRequestHandler):
             size = 0
             try:
                 for line in proc.stdout:
+                    line = ANSI.sub("", line)
                     lines.append(line)
                     size += len(line)
                     while size > 200_000 and len(lines) > 1:

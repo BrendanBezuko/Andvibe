@@ -331,10 +331,14 @@ def anthropic(cfg: dict, user: str, watch: SummaryWatch) -> tuple[str, tuple[int
 def gemini(cfg: dict, user: str, watch: SummaryWatch) -> tuple[str, tuple[int, int] | None]:
     model = cfg["model"].removeprefix("models/").strip()
     base = (cfg["base"] or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
-    if ":streamGenerateContent" in base or ":generateContent" in base:
+    if ":generateContent" in base and ":streamGenerateContent" not in base:
+        url = base.replace(":generateContent", ":streamGenerateContent")
+    elif ":streamGenerateContent" in base:
         url = base
     else:
-        url = f"{base}/models/{model}:streamGenerateContent?alt=sse"
+        url = f"{base}/models/{model}:streamGenerateContent"
+    if "alt=sse" not in url:
+        url += ("&" if "?" in url else "?") + "alt=sse"
     body = {
         "systemInstruction": {"parts": [{"text": PROMPT}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
