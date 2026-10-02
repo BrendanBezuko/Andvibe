@@ -105,6 +105,13 @@
             android:checked="true"
             android:text="Compile and test after applying" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Each chat commits the files it changes."
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
         <Button
             android:id="@+id/vibeSend"
             android:layout_width="match_parent"

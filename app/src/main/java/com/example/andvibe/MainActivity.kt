@@ -717,6 +717,16 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 )
                 val report = buildString {
                     append(edit.report)
+                    if (edit.written.isNotEmpty()) {
+                        append('\n')
+                        append(GitOps.commitChat(root, edit.written, instruction))
+                        if (!AppState.gitBusy) {
+                            AppState.gitSnapshot = runCatching {
+                                GitOps.snapshot(AppState.cwd, AppState.reposDir)
+                            }.getOrNull()
+                            UiBridge.gitUpdate()
+                        }
+                    }
                     if (auto && edit.written.isNotEmpty()) {
                         append("\n\n")
                         append(JsRunner.compile(root))

@@ -24,6 +24,7 @@ AndVibe
   run [file]                   preview HTML or run JS
 
 Open an older folder from Files, or clone a public repo.
+Each Vibe chat commits the files it changes, using your message.
 The Git tab stages, commits, and pushes. Edit on Vibe, then Build.
 A project with gradlew uploads to Cloud Run. Other projects pack on the phone.
 

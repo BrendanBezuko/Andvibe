@@ -161,15 +161,10 @@ object GitOps {
         val text = message.trim()
         if (text.isEmpty()) return "Write a commit message."
         val root = repo(start, repos)
-        val name = authorName.ifBlank { "AndVibe" }
-        val email = authorEmail.ifBlank { "andvibe@local" }
         return try {
             prepare()
             Git.open(root).use { git ->
-                val config = git.repository.config
-                config.setString("user", null, "name", name)
-                config.setString("user", null, "email", email)
-                config.save()
+                val (name, email) = author(git)
                 val status = git.status().call()
                 if (status.conflicting.isNotEmpty()) return@use "resolve conflicts before committing"
                 val staged = status.added.isNotEmpty() || status.changed.isNotEmpty() || status.removed.isNotEmpty()
@@ -189,6 +184,59 @@ object GitOps {
             }
         } catch (t: Throwable) {
             fail("commit", t)
+        }
+    }
+
+    fun commitChat(root: File, paths: List<File>, message: String): String {
+        val text = chatSubject(message)
+        if (text.isEmpty()) return "Write a commit message."
+        if (paths.isEmpty()) return "nothing to commit"
+        return try {
+            prepare()
+            if (!File(root, ".git").exists()) {
+                Git.init().setDirectory(root).call().close()
+            }
+            Git.open(root).use { git ->
+                val (name, email) = author(git)
+                val status = git.status().call()
+                if (status.conflicting.isNotEmpty()) return@use "resolve conflicts before committing"
+                val rels = paths.map { RepoFiles.rel(it, root) }
+                    .filter { rel ->
+                        rel.isNotEmpty() &&
+                            rel != ".git" &&
+                            !rel.startsWith(".git/") &&
+                            File(root, rel).isFile
+                    }
+                    .distinct()
+                if (rels.isEmpty()) return@use "nothing to commit"
+                val rev = if (git.repository.resolve("HEAD") == null) {
+                    for (rel in rels) git.add().addFilepattern(rel).call()
+                    git.commit()
+                        .setMessage(text)
+                        .setAuthor(name, email)
+                        .setCommitter(name, email)
+                        .call()
+                } else {
+                    val cmd = git.commit()
+                        .setMessage(text)
+                        .setAuthor(name, email)
+                        .setCommitter(name, email)
+                    for (rel in rels) cmd.setOnly(rel)
+                    cmd.call()
+                }
+                "committed ${rev.name.take(7)} ${rev.shortMessage}"
+            }
+        } catch (t: Throwable) {
+            val msg = t.message.orEmpty()
+            if (msg.contains("No changes", ignoreCase = true) ||
+                msg.contains("nothing to commit", ignoreCase = true) ||
+                t.javaClass.simpleName.contains("Empty") ||
+                t.javaClass.simpleName.contains("Emtpy")
+            ) {
+                "nothing to commit"
+            } else {
+                fail("commit", t)
+            }
         }
     }
 
@@ -459,6 +507,22 @@ object GitOps {
             tree.close()
             return true
         }
+    }
+
+    private fun author(git: Git): Pair<String, String> {
+        val name = authorName.ifBlank { "AndVibe" }
+        val email = authorEmail.ifBlank { "andvibe@local" }
+        val config = git.repository.config
+        config.setString("user", null, "name", name)
+        config.setString("user", null, "email", email)
+        config.save()
+        return name to email
+    }
+
+    private fun chatSubject(message: String): String {
+        val line = message.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()
+        val flat = line.replace(Regex("\\s+"), " ")
+        return if (flat.length <= 72) flat else flat.take(69).trimEnd() + "..."
     }
 
     private fun repo(start: File, repos: File): File {
