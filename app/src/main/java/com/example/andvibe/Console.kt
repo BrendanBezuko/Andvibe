@@ -23,6 +23,7 @@ AndVibe
   test                         run *.test.js and test/
   run [file]                   preview HTML or run JS
 
+Find on this tab searches GitHub, GitLab, and Codeberg. Tap a result and Files opens as the download starts.
 Open an older folder from Files, or clone a public repo.
 Vibe writes files and leaves them uncommitted. Stage and commit them on the Git tab.
 The Git tab stages, commits, and pushes. Edit on Vibe, then Build.

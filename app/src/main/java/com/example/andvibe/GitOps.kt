@@ -3,6 +3,8 @@ package com.example.andvibe
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.ResetCommand.ResetType
 import org.eclipse.jgit.lib.BranchTrackingStatus
+import org.eclipse.jgit.lib.PersonIdent
+import org.eclipse.jgit.revwalk.RevTag
 import org.eclipse.jgit.revwalk.RevWalk
 import org.eclipse.jgit.transport.HttpTransport
 import org.eclipse.jgit.transport.RefSpec
@@ -32,6 +34,8 @@ object GitOps {
     }
 
     data class CommitLine(val id: String, val subject: String, val whenText: String)
+
+    data class TagLine(val name: String, val subject: String, val whenText: String)
 
     data class Snapshot(
         val branch: String,
@@ -108,6 +112,60 @@ object GitOps {
             "unstaged $rel"
         } catch (t: Throwable) {
             fail("unstage", t)
+        }
+    }
+
+    fun tags(start: File, repos: File): List<TagLine> {
+        val root = repo(start, repos)
+        return try {
+            prepare()
+            Git.open(root).use { git ->
+                val refs = git.tagList().call()
+                git.repository.newObjectReader().use { reader ->
+                    RevWalk(reader).use { walk ->
+                        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                        refs.map { ref ->
+                            val peeled = git.repository.refDatabase.peel(ref)
+                            val commit = walk.parseCommit(peeled.peeledObjectId ?: ref.objectId)
+                            val tagObject = walk.parseAny(ref.objectId) as? RevTag
+                            val whenMs = tagObject?.taggerIdent?.getWhen()?.time
+                                ?: commit.commitTime.toLong() * 1000
+                            val notes = tagObject?.fullMessage?.trim().orEmpty()
+                                .ifBlank { commit.shortMessage.orEmpty() }
+                            whenMs to TagLine(
+                                ref.name.removePrefix("refs/tags/"),
+                                notes,
+                                fmt.format(whenMs)
+                            )
+                        }.sortedByDescending { it.first }.map { it.second }
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    fun createTag(start: File, repos: File, name: String, message: String): String {
+        val tag = name.trim()
+        if (!tag.matches(Regex("[A-Za-z0-9][A-Za-z0-9._/-]{0,80}"))) {
+            return "Tag names start with a letter or number and use letters, numbers, dots, dashes, and slashes"
+        }
+        val root = repo(start, repos)
+        return try {
+            prepare()
+            Git.open(root).use { git ->
+                val note = message.trim().ifEmpty { tag }
+                git.tag()
+                    .setName(tag)
+                    .setAnnotated(true)
+                    .setMessage(note)
+                    .setTagger(PersonIdent(authorName, authorEmail))
+                    .call()
+            }
+            "tagged $tag"
+        } catch (t: Throwable) {
+            fail("tag", t)
         }
     }
 

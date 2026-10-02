@@ -64,7 +64,7 @@ Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a fi
 
 ## Vibe
 
-Pick OpenAI, Anthropic, Gemini, Grok, or Custom. Paste an API key. The model and base URL start filled in and can be changed.
+Pick OpenAI, Anthropic, Gemini, Grok, OpenRouter, Cursor, or Custom. The model and base URL start filled in and can be changed. API keys are in Settings. OpenRouter model ids include the vendor, like `anthropic/claude-sonnet-5`. Cursor uses a key from the Cursor dashboard. Each send starts a cloud agent with no repository and waits for its reply. The phone still applies the file changes.
 
 | Provider | Default model | Base URL |
 | --- | --- | --- |
@@ -72,8 +72,14 @@ Pick OpenAI, Anthropic, Gemini, Grok, or Custom. Paste an API key. The model and
 | Anthropic | `claude-sonnet-5` | `https://api.anthropic.com` |
 | Gemini | `gemini-3.8-flash` | `https://generativelanguage.googleapis.com/v1beta` |
 | Grok | `grok-4.6` | `https://api.x.ai/v1` |
+| OpenRouter | `anthropic/claude-sonnet-5` | `https://openrouter.ai/api/v1` |
+| Cursor | `composer-2.5` | `https://api.cursor.com` |
 
 Keys stay in encrypted app storage on the phone. A build upload does not include them. **Revise** on the Build tab is what calls the model, and that call goes from the phone straight to the provider.
+
+## Find a repo
+
+On Console, type what you want and tap **Find**. AndVibe searches public repositories on GitHub, GitLab, and Codeberg. With an API key in Settings, the selected model ranks the matches. Tap a result and the Files tab opens as the download starts. If that folder is already on the phone, it opens instead of downloading again.
 
 ## Build on the phone
 
@@ -218,7 +224,7 @@ The phone zips the project and posts it to `/build?task=assembleDebug`. Gradle l
 
 If Gradle succeeds, the APK comes back and **Install** opens the system installer.
 
-If Gradle fails, the failure stays in the log. Tap **Revise**. That reads the log, calls the model with the key saved on the Vibe tab, writes the edited files on the phone, and commits them. Then tap **Build APK** again. Revise does nothing until a build log exists, and it asks for a Vibe key if none is saved.
+If Gradle fails, the failure stays in the log. Tap **Revise**. That reads the log, calls the model with the key saved in Settings, writes the edited files on the phone, and commits them. Then tap **Build APK** again. Revise does nothing until a build log exists, and it asks for an API key if none is saved.
 
 Deploy the new builder and install the new app together. The response is an event stream followed by the APK bytes. An older app expects a raw APK and will not understand this service.
 
@@ -245,3 +251,11 @@ You want a line like `host-tcp:8765 tcp:8765`. Open AndVibe on the emulator or p
 Then in Cursor, open Settings → MCP (or the command palette, search for MCP) and reload the **andvibe** server. A green dot means Cursor reached the phone. The tools are `logs`, `build_log`, `console_log`, and `state`. `logs` can be filtered by area, such as `cloud`, `cloud.zip`, or `cloud.http`. A request time on the Settings screen means something connected.
 
 `adb forward` has to be set again after the device disconnects. If an emulator is not the only device attached, pass `-s emulator-5554` (or whichever serial `adb devices` shows) on the forward commands.
+
+Wireless debugging is the same ADB connection, so the same forward reaches AndVibe on a phone on the network. Pair from the phone's Wireless debugging screen with the pairing port, then connect with the port on that screen (`adb connect` without a port tries 5555 and is refused). When the emulator is also attached, forward only the phone. Its serial looks like `adb-…._adb-tls-connect._tcp`:
+
+```bash
+adb -s adb-41271FDJG0013A-KmdyYN._adb-tls-connect._tcp forward tcp:8765 tcp:8765
+```
+
+Open AndVibe on that phone first. Cursor still uses `http://127.0.0.1:8765/mcp`. Run the forward again after the phone disconnects.

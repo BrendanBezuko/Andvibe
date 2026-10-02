@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -12,6 +13,41 @@
         android:text="Git"
         android:textColor="@color/ink"
         android:textSize="16sp" />
+
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/gitTabs"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:background="@color/bg"
+        app:tabIndicatorColor="@color/accent"
+        app:tabIndicatorFullWidth="false"
+        app:tabRippleColor="@android:color/transparent"
+        app:tabSelectedTextColor="@color/accent"
+        app:tabTextAppearance="@style/TextAppearance.AndVibe.Tab"
+        app:tabTextColor="@color/muted">
+
+        <com.google.android.material.tabs.TabItem
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Status" />
+
+        <com.google.android.material.tabs.TabItem
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Releases" />
+    </com.google.android.material.tabs.TabLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+    <LinearLayout
+        android:id="@+id/gitStatus"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
     <HorizontalScrollView
         android:layout_width="match_parent"
@@ -190,7 +226,7 @@
             android:id="@+id/gitMessage"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/panel"
+            android:background="@drawable/bg_field"
             android:gravity="top|start"
             android:hint="Commit message"
             android:importantForAutofill="no"
@@ -224,4 +260,83 @@
                 android:text="Message" />
         </LinearLayout>
     </LinearLayout>
+    </LinearLayout>
+
+        <ScrollView
+            android:id="@+id/gitReleases"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Annotated tag on the current commit of this project."
+                    android:textColor="@color/muted"
+                    android:textSize="13sp" />
+
+                <EditText
+                    android:id="@+id/releaseName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_field"
+                    android:hint="v1.0.0"
+                    android:importantForAutofill="no"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:padding="10dp"
+                    android:textColor="@color/ink"
+                    android:textColorHint="@color/muted"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/releaseNotes"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/bg_field"
+                    android:gravity="top|start"
+                    android:hint="Release notes"
+                    android:importantForAutofill="no"
+                    android:inputType="textMultiLine|textCapSentences"
+                    android:maxLines="6"
+                    android:minLines="3"
+                    android:padding="10dp"
+                    android:textColor="@color/ink"
+                    android:textColorHint="@color/muted"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/createRelease"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Create release" />
+
+                <TextView
+                    android:id="@+id/releaseEmpty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="No tags yet"
+                    android:textColor="@color/muted"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:id="@+id/releaseList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical" />
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
 </LinearLayout>

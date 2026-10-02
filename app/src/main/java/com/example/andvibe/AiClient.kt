@@ -39,7 +39,7 @@ object AiClient {
         history: ArrayDeque<Pair<String, String>>
     ): EditResult {
         if (instruction.length > 16_000) error("prompt is too long")
-        if (key.isBlank()) error("add an API key on the Vibe tab")
+        if (key.isBlank()) error("add an API key in Settings")
         if (model.isBlank()) error("set a model name")
         if (model.any { it.isWhitespace() }) error("model name has a space")
         val baseUrl = base.ifBlank { provider.defaultBase }
@@ -52,7 +52,8 @@ object AiClient {
         val reply = when (provider) {
             Provider.ANTHROPIC -> anthropic(baseUrl, key, model, messages)
             Provider.GEMINI -> gemini(baseUrl, key, model, messages)
-            else -> openaiCompatible(baseUrl, key, model, messages)
+            Provider.CURSOR -> cursor(baseUrl, key, model, messages)
+            else -> openaiCompatible(baseUrl, key, model, messages, headers = extraHeaders(provider))
         }
         val charged = if (reply.input == 0L && reply.output == 0L) {
             reply.copy(
@@ -87,7 +88,7 @@ object AiClient {
         base: String
     ): String {
         if (user.length > 16_000) error("prompt is too long")
-        if (key.isBlank()) error("add an API key on the Vibe tab")
+        if (key.isBlank()) error("add an API key in Settings")
         if (model.isBlank()) error("set a model name")
         if (model.any { it.isWhitespace() }) error("model name has a space")
         val baseUrl = base.ifBlank { provider.defaultBase }
@@ -99,7 +100,8 @@ object AiClient {
         val reply = when (provider) {
             Provider.ANTHROPIC -> anthropic(baseUrl, key, model, messages, system)
             Provider.GEMINI -> gemini(baseUrl, key, model, messages, system)
-            else -> openaiCompatible(baseUrl, key, model, messages, system)
+            Provider.CURSOR -> cursor(baseUrl, key, model, messages, system)
+            else -> openaiCompatible(baseUrl, key, model, messages, system, extraHeaders(provider))
         }
         val charged = if (reply.input == 0L && reply.output == 0L) {
             reply.copy(input = guessTokens(user.length + system.length), output = guessTokens(reply.text.length))
@@ -322,19 +324,25 @@ object AiClient {
         }
     }
 
+    private fun extraHeaders(provider: Provider): Map<String, String> {
+        if (provider != Provider.OPENROUTER) return emptyMap()
+        return mapOf("X-Title" to "AndVibe")
+    }
+
     private fun openaiCompatible(
         base: String,
         key: String,
         model: String,
         messages: List<Pair<String, String>>,
-        system: String = systemPrompt
+        system: String = systemPrompt,
+        headers: Map<String, String> = emptyMap()
     ): Reply {
         return try {
-            chatCompletions(base, key, model, messages, system)
+            chatCompletions(base, key, model, messages, system, headers)
         } catch (e: IllegalStateException) {
             val message = e.message.orEmpty()
             if (message.startsWith("HTTP 404") || message.contains("/v1/responses")) {
-                responses(base, key, model, messages, system)
+                responses(base, key, model, messages, system, headers)
             } else {
                 throw e
             }
@@ -346,7 +354,8 @@ object AiClient {
         key: String,
         model: String,
         messages: List<Pair<String, String>>,
-        system: String = systemPrompt
+        system: String = systemPrompt,
+        headers: Map<String, String> = emptyMap()
     ): Reply {
         fun once(field: String): Reply {
             val body = JSONObject()
@@ -358,7 +367,7 @@ object AiClient {
             }
             body.put("messages", arr)
             body.put(field, 8192)
-            val raw = post(chatUrl(base), mapOf("Authorization" to "Bearer $key"), body.toString())
+            val raw = post(chatUrl(base), mapOf("Authorization" to "Bearer $key") + headers, body.toString())
             val use = readUse(raw)
             return Reply(openAiText(raw), use.first, use.second)
         }
@@ -379,7 +388,8 @@ object AiClient {
         key: String,
         model: String,
         messages: List<Pair<String, String>>,
-        system: String = systemPrompt
+        system: String = systemPrompt,
+        headers: Map<String, String> = emptyMap()
     ): Reply {
         val body = JSONObject()
         body.put("model", model)
@@ -390,7 +400,7 @@ object AiClient {
             input.put(JSONObject().put("role", role).put("content", content))
         }
         body.put("input", input)
-        val raw = post(responsesUrl(base), mapOf("Authorization" to "Bearer $key"), body.toString())
+        val raw = post(responsesUrl(base), mapOf("Authorization" to "Bearer $key") + headers, body.toString())
         val use = readUse(raw)
         return Reply(responsesText(raw), use.first, use.second)
     }
@@ -538,18 +548,132 @@ object AiClient {
         return "$trimmed/models/$model:generateContent"
     }
 
+    private fun cursor(
+        base: String,
+        key: String,
+        model: String,
+        messages: List<Pair<String, String>>,
+        system: String = systemPrompt
+    ): Reply {
+        val body = JSONObject()
+        body.put("name", "AndVibe")
+        body.put("mode", "plan")
+        body.put("model", JSONObject().put("id", model))
+        body.put("prompt", JSONObject().put("text", cursorPrompt(system, messages)))
+        val created = JSONObject(post(cursorUrl(base, "/v1/agents"), cursorHeaders(key), body.toString()))
+        val agent = created.optJSONObject("agent") ?: error("Cursor did not return an agent")
+        val run = created.optJSONObject("run") ?: error("Cursor did not return a run")
+        val agentId = agent.optString("id")
+        val runId = run.optString("id")
+        if (agentId.isBlank() || runId.isBlank()) error("Cursor did not return a run id")
+        val page = agent.optString("url").ifBlank { agentId }
+        try {
+            val text = waitForCursor(base, key, agentId, runId, page)
+            val usage = cursorUsage(base, key, agentId, runId)
+            return Reply(text, usage.first, usage.second)
+        } finally {
+            runCatching {
+                post(cursorUrl(base, "/v1/agents/$agentId/archive"), cursorHeaders(key), "{}")
+            }
+        }
+    }
+
+    private fun cursorPrompt(system: String, messages: List<Pair<String, String>>): String {
+        return buildString {
+            append(system)
+            append("\n\n")
+            append(
+                "This request has no repository. Do not use tools, do not run commands, and do not edit files. " +
+                    "The phone applies file changes from your reply. Reply with only the requested text.\n\n"
+            )
+            for ((role, content) in messages) {
+                append(role).append(":\n").append(content).append("\n\n")
+            }
+        }
+    }
+
+    private fun waitForCursor(base: String, key: String, agentId: String, runId: String, page: String): String {
+        val deadline = System.currentTimeMillis() + 360_000L
+        while (System.currentTimeMillis() < deadline) {
+            val json = JSONObject(get(cursorUrl(base, "/v1/agents/$agentId/runs/$runId"), cursorHeaders(key)))
+            when (json.optString("status").uppercase()) {
+                "FINISHED" -> {
+                    val text = json.optString("result")
+                    if (text.isBlank()) error("empty response")
+                    return text
+                }
+                "ERROR", "CANCELLED", "EXPIRED" -> {
+                    val detail = json.optString("result").ifBlank { json.optString("status") }
+                    error("Cursor run ${json.optString("status")}: $detail\n$page")
+                }
+            }
+            try {
+                Thread.sleep(2_000)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                error("Cursor run interrupted\n$page")
+            }
+        }
+        error("Cursor run timed out\n$page")
+    }
+
+    private fun cursorUsage(base: String, key: String, agentId: String, runId: String): Pair<Long, Long> {
+        return try {
+            val json = JSONObject(
+                get(cursorUrl(base, "/v1/agents/$agentId/usage?runId=$runId"), cursorHeaders(key))
+            )
+            val runs = json.optJSONArray("runs")
+            val usage = runs?.optJSONObject(0)?.optJSONObject("usage")
+                ?: json.optJSONObject("totalUsage")
+            val input = usage?.optLong("inputTokens")?.coerceAtLeast(0) ?: 0L
+            val output = usage?.optLong("outputTokens")?.coerceAtLeast(0) ?: 0L
+            input to output
+        } catch (_: Exception) {
+            0L to 0L
+        }
+    }
+
+    private fun cursorHeaders(key: String): Map<String, String> {
+        return mapOf("Authorization" to "Bearer $key")
+    }
+
+    private fun cursorUrl(base: String, path: String): String {
+        val trimmed = base.trim().trimEnd('/')
+        val root = when {
+            trimmed.endsWith("/v1") -> trimmed.removeSuffix("/v1")
+            else -> trimmed
+        }
+        return root + path
+    }
+
     private fun post(url: String, headers: Map<String, String>, body: String): String {
+        return http("POST", url, headers, body, 180_000)
+    }
+
+    private fun get(url: String, headers: Map<String, String>): String {
+        return http("GET", url, headers, null, 30_000)
+    }
+
+    private fun http(
+        method: String,
+        url: String,
+        headers: Map<String, String>,
+        body: String?,
+        readTimeout: Int
+    ): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
-            conn.requestMethod = "POST"
+            conn.requestMethod = method
             conn.connectTimeout = 20_000
-            conn.readTimeout = 180_000
-            conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.readTimeout = readTimeout
             conn.setRequestProperty("Accept", "application/json")
             conn.setRequestProperty("User-Agent", "AndVibe")
             headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
-            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            if (body != null) {
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            }
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()

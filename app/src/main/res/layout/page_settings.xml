@@ -22,6 +22,51 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
+            android:text="API keys"
+            android:textColor="@color/ink"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="One key per provider. Vibe uses whichever provider is selected there. Closing this screen saves them."
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:id="@+id/apiKeyList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/showApiKeys"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Show keys" />
+
+        <Button
+            android:id="@+id/saveApiKeys"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="40dp"
+            android:text="Save keys"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/keyNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
             android:text="MCP"
             android:textColor="@color/ink"
             android:textSize="14sp" />
@@ -69,7 +114,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:background="@color/panel"
+            android:background="@drawable/bg_field"
             android:hint="Name"
             android:importantForAutofill="no"
             android:inputType="textPersonName"
@@ -84,7 +129,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:background="@color/panel"
+            android:background="@drawable/bg_field"
             android:hint="Email"
             android:importantForAutofill="no"
             android:inputType="textEmailAddress"
@@ -99,7 +144,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:background="@color/panel"
+            android:background="@drawable/bg_field"
             android:hint="HTTPS user"
             android:importantForAutofill="no"
             android:inputType="text"
@@ -114,7 +159,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:background="@color/panel"
+            android:background="@drawable/bg_field"
             android:hint="HTTPS token"
             android:importantForAutofill="no"
             android:inputType="textPassword"
@@ -129,7 +174,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:background="@color/panel"
+            android:background="@drawable/bg_field"
             android:hint="Origin for this project"
             android:importantForAutofill="no"
             android:inputType="textUri"
@@ -144,7 +189,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:background="@color/panel"
+            android:background="@drawable/bg_field"
             android:gravity="top|start"
             android:hint="SSH private key"
             android:importantForAutofill="no"

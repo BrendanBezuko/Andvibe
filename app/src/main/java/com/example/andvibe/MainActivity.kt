@@ -6,6 +6,10 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.AdapterView
@@ -21,9 +25,14 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.example.andvibe.databinding.ActivityMainBinding
 import com.example.andvibe.databinding.RowCardBinding
+import com.example.andvibe.databinding.RowFossBinding
 import com.example.andvibe.databinding.RowGitFileBinding
 import com.google.android.material.checkbox.MaterialCheckBox
+import com.google.android.material.tabs.TabLayout
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private lateinit var binding: ActivityMainBinding
@@ -33,6 +42,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private var savedText = ""
     private var editing = false
     private var displayed = emptyList<File>()
+    private val vault = mutableMapOf<String, EditText>()
+    private val apiKeys = linkedMapOf<Provider, EditText>()
     private var settingsOpen = false
     private var boardOpen = false
     private var workspaceOpen = false
@@ -118,8 +129,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     override fun onPause() {
         saveEditor(announce = false)
         if (::store.isInitialized) {
+            if (settingsOpen) saveApiKeys(announce = false)
             saveProvider(currentProvider)
-            saveBuildServer()
             saveWorkspaceName()
         }
         super.onPause()
@@ -134,8 +145,45 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val scroll = binding.consolePage.logScroll
         val child = scroll.getChildAt(0)
         val nearBottom = child == null || child.bottom <= scroll.height + scroll.scrollY + 160
-        binding.consolePage.logView.text = AppState.text()
+        binding.consolePage.logView.text = paintLog(AppState.text())
+        paintTape()
         if (nearBottom) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    private fun paintTape() {
+        val project = runCatching { AppState.projectRoot().name }.getOrDefault("—")
+        binding.consolePage.consoleProject.text = project
+        binding.consolePage.consoleClock.text = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+    }
+
+    private fun paintLog(raw: String): CharSequence {
+        if (raw.isEmpty()) return raw
+        val span = SpannableString(raw)
+        val normal = getColor(R.color.tape_ink)
+        val bid = getColor(R.color.bid)
+        val ask = getColor(R.color.ask)
+        val quote = getColor(R.color.quote)
+        var start = 0
+        while (start <= raw.length) {
+            val newline = raw.indexOf('\n', start)
+            val end = if (newline < 0) raw.length else newline
+            if (end > start) {
+                val line = raw.substring(start, end)
+                val color = when {
+                    line.startsWith("$ ") -> quote
+                    line.startsWith("error", ignoreCase = true) ||
+                        line.contains("failed", ignoreCase = true) -> ask
+                    line.startsWith("saved") || line.startsWith("staged") ||
+                        line.startsWith("unstaged") || line.startsWith("tagged") ||
+                        line.startsWith("pushed") || line.startsWith("pulled") -> bid
+                    else -> normal
+                }
+                span.setSpan(ForegroundColorSpan(color), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            if (newline < 0) break
+            start = newline + 1
+        }
+        return span
     }
 
     override fun onFiles() {
@@ -173,14 +221,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     override fun onVibe() {
+        if (!AppState.vibeBusy && AppState.vibeResult.isNotEmpty()) {
+            AppState.chat.add("assistant" to AppState.vibeResult)
+            AppState.vibeResult = ""
+        }
+        renderChat()
         binding.vibePage.vibeSend.isEnabled = !AppState.vibeBusy
-        if (AppState.vibeBusy) {
-            binding.vibePage.vibeResult.text = "Working…"
-            return
-        }
-        if (AppState.vibeResult.isNotEmpty()) {
-            binding.vibePage.vibeResult.text = AppState.vibeResult
-        }
         val paths = AppState.writtenPaths
         AppState.writtenPaths = emptyList()
         if (paths.isNotEmpty()) {
@@ -194,9 +240,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val child = scroll.getChildAt(0)
         val nearBottom = child == null || child.bottom <= scroll.height + scroll.scrollY + 160
         val text = AppState.buildText()
-        binding.buildPage.buildLog.text = text.ifBlank {
-            "Paste the Cloud Run URL and token. Build logs stream here. Revise edits the project on this phone. The API key stays on the device."
-        }
+        binding.buildPage.buildLog.text = text
         val root = runCatching { AppState.projectRoot() }.getOrNull()
         binding.buildPage.projectLine.text = if (root == null) {
             "No repo yet. Clone one in Console."
@@ -298,6 +342,19 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
         binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
         binding.settingsPage.saveGit.setOnClickListener { saveGitSettings() }
+        binding.settingsPage.saveApiKeys.setOnClickListener { saveApiKeys(announce = true) }
+        binding.settingsPage.showApiKeys.setOnCheckedChangeListener { _, checked ->
+            val type = if (checked) {
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            } else {
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            for (field in apiKeys.values) {
+                field.inputType = type
+                field.setSelection(field.text?.length ?: 0)
+            }
+        }
+        buildApiKeyFields()
     }
 
     private fun openSettings() {
@@ -306,15 +363,60 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         settingsOpen = true
         binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
         loadGitSettings()
+        loadApiKeys()
         binding.settingsPage.root.visibility = View.VISIBLE
         syncBack()
     }
 
     private fun closeSettings() {
         if (!settingsOpen) return
+        saveApiKeys(announce = false)
         settingsOpen = false
         binding.settingsPage.root.visibility = View.GONE
         syncBack()
+    }
+
+    private fun buildApiKeyFields() {
+        val parent = binding.settingsPage.apiKeyList
+        if (parent.childCount > 0) return
+        for (provider in Provider.entries) {
+            val field = EditText(this).apply {
+                hint = "${provider.label} API key"
+                setHintTextColor(getColor(R.color.muted))
+                setTextColor(getColor(R.color.ink))
+                setBackgroundResource(R.drawable.bg_field)
+                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                maxLines = 1
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                textSize = 14f
+                setText(store.get(provider, "key", ""))
+            }
+            apiKeys[provider] = field
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            params.topMargin = dp(8)
+            parent.addView(field, params)
+        }
+    }
+
+    private fun loadApiKeys() {
+        for ((provider, field) in apiKeys) {
+            field.setText(store.get(provider, "key", ""))
+        }
+        binding.settingsPage.keyNote.text = ""
+    }
+
+    private fun saveApiKeys(announce: Boolean) {
+        if (apiKeys.isEmpty()) return
+        for ((provider, field) in apiKeys) {
+            val key = field.text?.toString()?.trim().orEmpty()
+            store.saveKey(provider, key)
+            vault["${provider.id}_key"]?.setText(key)
+        }
+        if (announce) binding.settingsPage.keyNote.text = "Saved."
     }
 
     private fun setupUsage() {
@@ -566,8 +668,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun setupConsole() {
-        binding.consolePage.commandRun.setOnClickListener { submitCommand() }
-        binding.consolePage.commandInput.setOnEditorActionListener { _, actionId, _ ->
+        val page = binding.consolePage
+        page.commandRun.setOnClickListener { submitCommand() }
+        page.commandInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE) {
                 submitCommand()
                 true
@@ -575,7 +678,183 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 false
             }
         }
+        page.consoleTabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) = showConsoleTab(tab.position)
+            override fun onTabUnselected(tab: TabLayout.Tab) {}
+            override fun onTabReselected(tab: TabLayout.Tab) {}
+        })
+        page.saveSecrets.setOnClickListener { saveSecrets() }
+        page.saveVariables.setOnClickListener { saveVariables() }
+        page.findGo.setOnClickListener { findRepos() }
+        page.findQuery.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE) {
+                findRepos()
+                true
+            } else {
+                false
+            }
+        }
+        buildVault()
+        renderFind()
     }
+
+    private fun showConsoleTab(index: Int) {
+        val page = binding.consolePage
+        page.terminalPane.visibility = if (index == 0) View.VISIBLE else View.GONE
+        page.secretsPane.visibility = if (index == 1) View.VISIBLE else View.GONE
+        page.variablesPane.visibility = if (index == 2) View.VISIBLE else View.GONE
+        if (index != 0) {
+            saveProvider(currentProvider)
+            loadVault()
+        }
+    }
+
+    private fun buildVault() {
+        val secrets = binding.consolePage.secretsList
+        val variables = binding.consolePage.variablesList
+        vaultNote(secrets, "API keys, the build token, and git credentials. They stay encrypted on this device.")
+        for (provider in Provider.entries) {
+            vaultField(secrets, "${provider.id}_key", "${provider.label} API key", secret = true)
+        }
+        vaultField(secrets, "build_token", "Build token", secret = true)
+        vaultField(secrets, "git_token", "Git HTTPS token", secret = true)
+        vaultField(secrets, "git_ssh", "SSH private key", secret = true, lines = 4)
+
+        vaultNote(variables, "Models, base URLs, the Cloud Run address, and git identity for the open project.")
+        for (provider in Provider.entries) {
+            vaultField(variables, "${provider.id}_model", "${provider.label} model", secret = false)
+            vaultField(variables, "${provider.id}_base", "${provider.label} base URL", secret = false)
+        }
+        vaultField(variables, "build_url", "Build service URL", secret = false)
+        vaultField(variables, "git_name", "Git name", secret = false)
+        vaultField(variables, "git_email", "Git email", secret = false)
+        vaultField(variables, "git_user", "Git HTTPS user", secret = false)
+        vaultField(variables, "git_origin", "Remote URL", secret = false)
+        loadVault()
+    }
+
+    private fun vaultNote(parent: LinearLayout, text: String) {
+        parent.addView(TextView(this).apply {
+            this.text = text
+            setTextColor(getColor(R.color.muted))
+            textSize = 13f
+        })
+    }
+
+    private fun vaultField(parent: LinearLayout, key: String, hint: String, secret: Boolean, lines: Int = 1) {
+        val field = EditText(this).apply {
+            this.hint = hint
+            setHintTextColor(getColor(R.color.muted))
+            setTextColor(getColor(R.color.ink))
+            setBackgroundResource(R.drawable.bg_field)
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            textSize = 14f
+            if (lines > 1) {
+                minLines = lines
+                gravity = Gravity.TOP or Gravity.START
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                    if (secret) InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            } else if (secret) {
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                maxLines = 1
+            } else {
+                inputType = InputType.TYPE_CLASS_TEXT
+                maxLines = 1
+            }
+        }
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        params.topMargin = dp(8)
+        parent.addView(field, params)
+        vault[key] = field
+    }
+
+    private fun loadVault() {
+        for (provider in Provider.entries) {
+            vault["${provider.id}_key"]?.setText(store.get(provider, "key", ""))
+            vault["${provider.id}_model"]?.setText(store.get(provider, "model", provider.defaultModel))
+            vault["${provider.id}_base"]?.setText(store.get(provider, "base", provider.defaultBase))
+        }
+        vault["build_token"]?.setText(store.buildToken())
+        vault["build_url"]?.setText(store.buildUrl())
+        vault["git_token"]?.setText(store.gitToken())
+        vault["git_ssh"]?.setText(store.gitSsh())
+        vault["git_name"]?.setText(store.gitName())
+        vault["git_email"]?.setText(store.gitEmail())
+        vault["git_user"]?.setText(store.gitUser())
+        vault["git_origin"]?.setText(
+            runCatching { GitOps.originUrl(AppState.cwd, AppState.reposDir) }.getOrDefault("")
+        )
+    }
+
+    private fun saveSecrets() {
+        val selected = currentProvider
+        for (provider in Provider.entries) {
+            val key = vaultText("${provider.id}_key")
+            store.saveProvider(
+                provider,
+                key,
+                store.get(provider, "model", provider.defaultModel),
+                store.get(provider, "base", provider.defaultBase),
+                select = provider == selected
+            )
+            apiKeys[provider]?.setText(key)
+        }
+        val token = vaultText("build_token")
+        val gitToken = vaultText("git_token")
+        val ssh = vaultText("git_ssh")
+        store.saveBuild(store.buildUrl(), token)
+        store.saveGit(store.gitName(), store.gitEmail(), store.gitUser(), gitToken, ssh)
+        GitOps.remoteToken = gitToken
+        binding.settingsPage.gitHttpsToken.setText(gitToken)
+        binding.settingsPage.gitSsh.setText(ssh)
+        AppState.log("saved secrets")
+    }
+
+    private fun saveVariables() {
+        val selected = currentProvider
+        for (provider in Provider.entries) {
+            store.saveProvider(
+                provider,
+                store.get(provider, "key", ""),
+                vaultText("${provider.id}_model"),
+                vaultText("${provider.id}_base"),
+                select = provider == selected
+            )
+        }
+        val url = vaultText("build_url")
+        val name = vaultText("git_name")
+        val email = vaultText("git_email")
+        val user = vaultText("git_user")
+        val origin = vaultText("git_origin")
+        store.saveBuild(url, store.buildToken())
+        store.saveGit(name, email, user, store.gitToken(), store.gitSsh())
+        GitOps.authorName = name.ifBlank { "AndVibe" }
+        GitOps.authorEmail = email.ifBlank { "andvibe@local" }
+        GitOps.remoteUser = user
+        binding.vibePage.model.setText(vaultText("${selected.id}_model"))
+        binding.vibePage.baseUrl.setText(vaultText("${selected.id}_base"))
+        binding.settingsPage.gitName.setText(name)
+        binding.settingsPage.gitEmail.setText(email)
+        binding.settingsPage.gitHttpsUser.setText(user)
+        binding.settingsPage.gitOrigin.setText(origin)
+        AppState.io.execute {
+            val current = runCatching { GitOps.originUrl(AppState.cwd, AppState.reposDir) }.getOrDefault("")
+            val message = if (origin == current) {
+                "saved variables"
+            } else {
+                GitOps.setOrigin(AppState.cwd, AppState.reposDir, origin)
+            }
+            runOnUiThread { AppState.log(message) }
+        }
+    }
+
+    private fun vaultText(key: String): String = vault[key]?.text?.toString()?.trim().orEmpty()
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun submitCommand() {
         val line = binding.consolePage.commandInput.text?.toString()?.trim().orEmpty()
@@ -587,6 +866,119 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 Console.run(line)
             } catch (t: Throwable) {
                 AppState.log("error: ${t.message ?: t.javaClass.simpleName}")
+            }
+        }
+    }
+
+    private fun findRepos() {
+        if (AppState.findBusy) return
+        val query = binding.consolePage.findQuery.text?.toString()?.trim().orEmpty()
+        if (query.isEmpty()) {
+            AppState.findNote = "Say what you want to find."
+            renderFind()
+            return
+        }
+        saveProvider(currentProvider)
+        val provider = currentProvider
+        val key = store.get(provider, "key", "")
+        val model = store.get(provider, "model", provider.defaultModel)
+        val base = store.get(provider, "base", provider.defaultBase)
+        AppState.findBusy = true
+        AppState.findHits = emptyList()
+        AppState.findNote = "Searching GitHub, GitLab, and Codeberg…"
+        renderFind()
+        DebugLog.step("find", "start chars=${query.length} provider=${provider.id}")
+        AppState.io.execute {
+            val result = try {
+                FossSearch.search(query, provider, key, model, base)
+            } catch (t: Throwable) {
+                DebugLog.step("find", "fail ${t.javaClass.simpleName}: ${t.message}")
+                FossSearch.SearchResult(emptyList(), t.message ?: "search failed")
+            }
+            AppState.findHits = result.hits
+            AppState.findNote = result.note
+            AppState.findBusy = false
+            DebugLog.step("find", "done hits=${result.hits.size}")
+            runOnUiThread {
+                if (!isFinishing) renderFind()
+            }
+        }
+    }
+
+    private fun renderFind() {
+        val page = binding.consolePage
+        page.findGo.isEnabled = !AppState.findBusy
+        page.findGo.text = if (AppState.findBusy) "Finding…" else "Find"
+        val note = AppState.findNote
+        page.findStatus.text = note
+        page.findStatus.visibility = if (note.isBlank()) View.GONE else View.VISIBLE
+        val hits = AppState.findHits
+        page.findScroll.visibility = if (hits.isEmpty()) View.GONE else View.VISIBLE
+        page.findResults.removeAllViews()
+        for (hit in hits) {
+            val row = RowFossBinding.inflate(layoutInflater, page.findResults, false)
+            row.fossName.text = hit.name
+            row.fossMeta.text = "${hostOf(hit.page)} · ${hit.stars} stars"
+            row.fossWhy.text = hit.why.ifBlank { hit.blurb }
+            row.root.setOnClickListener { downloadHit(hit) }
+            page.findResults.addView(row.root)
+        }
+    }
+
+    private fun hostOf(url: String): String {
+        val host = try {
+            java.net.URI(url).host?.lowercase()?.removePrefix("www.")
+        } catch (_: Exception) {
+            null
+        }
+        return when (host) {
+            "github.com" -> "GitHub"
+            "gitlab.com" -> "GitLab"
+            "codeberg.org" -> "Codeberg"
+            else -> host ?: "repo"
+        }
+    }
+
+    private fun downloadHit(hit: FossSearch.RepoHit) {
+        if (AppState.downloadBusy) return
+        if (editing) closeEditor(save = true)
+        AppState.downloadBusy = true
+        AppState.downloadNote = "Downloading ${hit.name}…"
+        saveEditor(announce = false)
+        binding.bottomNav.selectedItemId = R.id.nav_files
+        refreshFileList()
+        AppState.log("clone ${hit.cloneUrl}")
+        val app = applicationContext
+        AppState.io.execute {
+            var failed: String? = null
+            try {
+                val url = GitClient.normalizeGitUrl(hit.cloneUrl)
+                val name = GitClient.repoNameFromUrl(url)
+                val dest = File(AppState.reposDir, name)
+                if (dest.isDirectory && !dest.list().isNullOrEmpty()) {
+                    AppState.cwd = dest.canonicalFile
+                    ProjectStore.remember(app, AppState.cwd)
+                    AppState.log("already in ~/$name")
+                } else {
+                    GitClient.clone(url, dest, AppState::log)
+                    AppState.cwd = dest.canonicalFile
+                    ProjectStore.remember(app, AppState.cwd)
+                }
+                AppState.gitDetail = null
+                AppState.gitSnapshot = null
+                AppState.openFile = null
+                UiBridge.projectChanged()
+            } catch (t: Throwable) {
+                failed = "clone failed: ${t.message ?: t.javaClass.simpleName}"
+                AppState.log(failed)
+            } finally {
+                AppState.downloadBusy = false
+                AppState.downloadNote = null
+                UiBridge.filesChanged()
+            }
+            val message = failed ?: return@execute
+            runOnUiThread {
+                if (!isFinishing && !editing) binding.filesPage.filesPath.text = message
             }
         }
     }
@@ -635,16 +1027,59 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         spinnerReady = true
         binding.vibePage.autoTest.isChecked = store.autoTest()
         binding.vibePage.autoTest.setOnCheckedChangeListener { _, checked -> store.setAutoTest(checked) }
-        binding.vibePage.showKey.setOnCheckedChangeListener { _, checked ->
-            val field = binding.vibePage.apiKey
-            field.inputType = if (checked) {
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            } else {
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            }
-            field.setSelection(field.text?.length ?: 0)
-        }
         binding.vibePage.vibeSend.setOnClickListener { sendVibe() }
+        binding.vibePage.vibePrompt.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEND) {
+                sendVibe()
+                true
+            } else {
+                false
+            }
+        }
+        binding.vibePage.vibeTabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) = showVibeTab(tab.position)
+            override fun onTabUnselected(tab: TabLayout.Tab) {}
+            override fun onTabReselected(tab: TabLayout.Tab) {}
+        })
+    }
+
+    private fun showVibeTab(index: Int) {
+        val model = index == 1
+        if (!model) saveProvider(currentProvider)
+        binding.vibePage.chatPane.visibility = if (model) View.GONE else View.VISIBLE
+        binding.vibePage.modelPane.visibility = if (model) View.VISIBLE else View.GONE
+    }
+
+    private fun renderChat() {
+        val list = binding.vibePage.chatList
+        list.removeAllViews()
+        val turns = AppState.chat.toList()
+        val working = AppState.vibeBusy
+        binding.vibePage.chatEmpty.visibility = if (turns.isEmpty() && !working) View.VISIBLE else View.GONE
+        for ((role, text) in turns) list.addView(chatBubble(role, text))
+        if (working) list.addView(chatBubble("assistant", "Working…"))
+        binding.vibePage.chatScroll.post { binding.vibePage.chatScroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    private fun chatBubble(role: String, text: String): View {
+        val user = role == "user"
+        val bubble = TextView(this).apply {
+            this.text = text
+            setTextColor(getColor(R.color.ink))
+            textSize = 15f
+            setBackgroundResource(R.drawable.bg_card)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        params.topMargin = dp(8)
+        params.gravity = if (user) Gravity.END else Gravity.START
+        val max = (resources.displayMetrics.widthPixels * 0.82f).toInt()
+        bubble.maxWidth = max
+        bubble.layoutParams = params
+        return bubble
     }
 
     private fun setupGit() {
@@ -702,30 +1137,99 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         page.gitCommit.setOnClickListener { commitGit() }
         page.gitSuggest.setOnClickListener { suggestCommitMessage() }
         page.gitDetailClose.setOnClickListener { closeGitDetail() }
+        page.gitTabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) = showGitTab(tab.position)
+            override fun onTabUnselected(tab: TabLayout.Tab) {}
+            override fun onTabReselected(tab: TabLayout.Tab) {
+                if (tab.position == 1) loadReleases()
+            }
+        })
+        page.createRelease.setOnClickListener { createRelease() }
+    }
+
+    private fun showGitTab(index: Int) {
+        val releases = index == 1
+        binding.gitPage.gitStatus.visibility = if (releases) View.GONE else View.VISIBLE
+        binding.gitPage.gitReleases.visibility = if (releases) View.VISIBLE else View.GONE
+        if (releases) loadReleases()
+    }
+
+    private fun loadReleases() {
+        AppState.io.execute {
+            val tags = runCatching { GitOps.tags(AppState.cwd, AppState.reposDir) }.getOrDefault(emptyList())
+            runOnUiThread { renderReleases(tags) }
+        }
+    }
+
+    private fun renderReleases(tags: List<GitOps.TagLine>) {
+        val list = binding.gitPage.releaseList
+        list.removeAllViews()
+        binding.gitPage.releaseEmpty.visibility = if (tags.isEmpty()) View.VISIBLE else View.GONE
+        for (tag in tags) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundResource(R.drawable.bg_card)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }
+            card.addView(TextView(this).apply {
+                text = tag.name
+                setTextColor(getColor(R.color.accent))
+                textSize = 15f
+            })
+            card.addView(TextView(this).apply {
+                text = tag.whenText
+                setTextColor(getColor(R.color.muted))
+                textSize = 12f
+            })
+            if (tag.subject.isNotBlank() && tag.subject != tag.name) {
+                card.addView(TextView(this).apply {
+                    text = tag.subject
+                    setTextColor(getColor(R.color.ink))
+                    textSize = 13f
+                    setPadding(0, dp(4), 0, 0)
+                })
+            }
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            params.topMargin = dp(8)
+            list.addView(card, params)
+        }
+    }
+
+    private fun createRelease() {
+        val name = binding.gitPage.releaseName.text?.toString()?.trim().orEmpty()
+        val notes = binding.gitPage.releaseNotes.text?.toString()?.trim().orEmpty()
+        if (name.isEmpty()) {
+            AppState.log("Release needs a name")
+            return
+        }
+        AppState.io.execute {
+            val text = GitOps.createTag(AppState.cwd, AppState.reposDir, name, notes)
+            val tags = runCatching { GitOps.tags(AppState.cwd, AppState.reposDir) }.getOrDefault(emptyList())
+            runOnUiThread {
+                AppState.log(text)
+                renderReleases(tags)
+                if (text.startsWith("tagged ")) {
+                    binding.gitPage.releaseName.setText("")
+                    binding.gitPage.releaseNotes.setText("")
+                }
+            }
+        }
     }
 
     private fun setupBuild() {
-        binding.buildPage.buildUrl.setText(store.buildUrl())
-        binding.buildPage.buildToken.setText(store.buildToken())
         binding.buildPage.buildApk.setOnClickListener { startBuild() }
         binding.buildPage.reviseBuild.setOnClickListener { reviseBuild() }
         binding.buildPage.installApk.setOnClickListener { installBuiltApk() }
     }
 
-    private fun saveBuildServer() {
-        if (!::store.isInitialized || !::binding.isInitialized) return
-        store.saveBuild(
-            binding.buildPage.buildUrl.text?.toString()?.trim().orEmpty(),
-            binding.buildPage.buildToken.text?.toString()?.trim().orEmpty()
-        )
-    }
-
     private fun startBuild() {
         if (AppState.buildBusy || AppState.reviseBusy) return
         saveEditor(announce = false)
-        val url = binding.buildPage.buildUrl.text?.toString()?.trim().orEmpty()
-        val token = binding.buildPage.buildToken.text?.toString()?.trim().orEmpty()
-        saveBuildServer()
+        val url = store.buildUrl()
+        val token = store.buildToken()
         AppState.buildBusy = true
         AppState.clearBuild()
         val appContext = applicationContext
@@ -739,7 +1243,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 if (cloud) {
                     if (url.isBlank() || token.isBlank()) {
                         DebugLog.step("build", "missing url or token")
-                        AppState.buildLog("Paste the Cloud Run URL and build token, then press Build APK again.")
+                        AppState.buildLog("Set the build URL and token on Console → Variables.")
                     } else {
                         DebugLog.step("build", "mode=cloud")
                         val note: (String) -> Unit = { line ->
@@ -795,7 +1299,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val model = store.get(provider, "model", provider.defaultModel)
         val base = store.get(provider, "base", provider.defaultBase)
         if (key.isBlank() || model.isBlank()) {
-            val message = "Add an API key on the Vibe tab, then tap Revise."
+            val message = "Add an API key in Settings, then tap Revise."
             AppState.buildLog(message)
             AppState.log(message)
             return
@@ -924,7 +1428,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private fun refreshFileList() {
         val cwd = AppState.cwd
         val repos = AppState.reposDir
-        binding.filesPage.filesPath.text = RepoFiles.display(cwd, repos)
+        binding.filesPage.filesPath.text = AppState.downloadNote ?: RepoFiles.display(cwd, repos)
         binding.filesPage.filesUp.isEnabled = cwd.canonicalPath != repos.canonicalPath
         val files = cwd.listFiles()
             ?.filter { it.name != ".git" }
@@ -936,8 +1440,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             R.layout.row_file,
             files.map { if (it.isDirectory) it.name + "/" else it.name }
         )
-        binding.filesPage.filesEmpty.text = if (cwd.canonicalPath == repos.canonicalPath) {
-            "Clone a repo, or tap Open for a folder already on this phone."
+        binding.filesPage.filesEmpty.text = AppState.downloadNote ?: if (cwd.canonicalPath == repos.canonicalPath) {
+            "Find a repo on Console, or tap Open for a folder already on this phone."
         } else {
             "Empty folder"
         }
@@ -1030,15 +1534,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun loadProvider(provider: Provider) {
-        binding.vibePage.apiKey.setText(store.get(provider, "key", ""))
         binding.vibePage.model.setText(store.get(provider, "model", provider.defaultModel))
         binding.vibePage.baseUrl.setText(store.get(provider, "base", provider.defaultBase))
     }
 
     private fun saveProvider(provider: Provider) {
-        store.save(
+        store.saveChoice(
             provider,
-            binding.vibePage.apiKey.text?.toString()?.trim().orEmpty(),
             binding.vibePage.model.text?.toString()?.trim().orEmpty(),
             binding.vibePage.baseUrl.text?.toString()?.trim().orEmpty()
         )
@@ -1047,14 +1549,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private fun sendVibe() {
         if (AppState.vibeBusy) return
         val instruction = binding.vibePage.vibePrompt.text?.toString()?.trim().orEmpty()
-        if (instruction.isEmpty()) {
-            binding.vibePage.vibeResult.text = "Write what you want changed."
-            return
-        }
+        if (instruction.isEmpty()) return
         saveEditor(announce = false)
         saveProvider(currentProvider)
+        binding.vibePage.vibePrompt.setText("")
+        AppState.chat.add("user" to instruction)
         val provider = currentProvider
-        val key = binding.vibePage.apiKey.text?.toString()?.trim().orEmpty()
+        val key = store.get(provider, "key", "")
         val model = binding.vibePage.model.text?.toString()?.trim().orEmpty()
         val base = binding.vibePage.baseUrl.text?.toString()?.trim().orEmpty()
         val auto = binding.vibePage.autoTest.isChecked
@@ -1334,7 +1835,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val model = store.get(provider, "model", provider.defaultModel)
         val base = store.get(provider, "base", provider.defaultBase)
         if (key.isBlank() || model.isBlank()) {
-            AppState.log("Add an API key on the Vibe tab, then tap Message.")
+            AppState.log("Add an API key in Settings, then tap Message.")
             return
         }
         saveEditor(announce = false)

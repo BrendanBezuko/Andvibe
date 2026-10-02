@@ -13,36 +13,6 @@
         android:textColor="@color/ink"
         android:textSize="14sp" />
 
-    <EditText
-        android:id="@+id/buildUrl"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:background="@color/panel"
-        android:hint="https://….run.app"
-        android:importantForAutofill="no"
-        android:inputType="textUri"
-        android:padding="10dp"
-        android:singleLine="true"
-        android:textColor="@color/ink"
-        android:textColorHint="@color/muted"
-        android:textSize="14sp" />
-
-    <EditText
-        android:id="@+id/buildToken"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:background="@color/panel"
-        android:hint="Build token"
-        android:importantForAutofill="no"
-        android:inputType="textPassword"
-        android:padding="10dp"
-        android:singleLine="true"
-        android:textColor="@color/ink"
-        android:textColorHint="@color/muted"
-        android:textSize="14sp" />
-
     <TextView
         android:id="@+id/apkPath"
         android:layout_width="match_parent"
@@ -99,7 +69,7 @@
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
             android:lineSpacingExtra="2dp"
-            android:text="Paste the Cloud Run URL and token. Build logs stream here. Revise edits the project on this phone. The API key stays on the device."
+            android:text=""
             android:textColor="@color/ink"
             android:textIsSelectable="true"
             android:textSize="13sp" />

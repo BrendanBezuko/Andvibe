@@ -12,6 +12,7 @@ object AppState {
 
     val io = Executors.newSingleThreadExecutor()
     val history = ArrayDeque<Pair<String, String>>()
+    val chat = mutableListOf<Pair<String, String>>()
 
     lateinit var appContext: Context
     lateinit var reposDir: File
@@ -22,6 +23,11 @@ object AppState {
     @Volatile var vibeBusy = false
     var vibeResult = ""
     var writtenPaths: List<String> = emptyList()
+    @Volatile var findBusy = false
+    var findHits: List<FossSearch.RepoHit> = emptyList()
+    var findNote: String = ""
+    @Volatile var downloadBusy = false
+    @Volatile var downloadNote: String? = null
 
     @Volatile var buildBusy = false
     @Volatile var reviseBusy = false

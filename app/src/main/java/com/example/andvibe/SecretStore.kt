@@ -27,12 +27,28 @@ class SecretStore(context: Context) {
     }
 
     fun save(provider: Provider, apiKey: String, model: String, base: String) {
+        saveProvider(provider, apiKey, model, base, select = true)
+    }
+
+    fun saveChoice(provider: Provider, model: String, base: String) {
         prefs.edit()
-            .putString("${provider.id}_key", apiKey)
             .putString("${provider.id}_model", model)
             .putString("${provider.id}_base", base)
             .putString("provider", provider.id)
             .apply()
+    }
+
+    fun saveKey(provider: Provider, apiKey: String) {
+        prefs.edit().putString("${provider.id}_key", apiKey).commit()
+    }
+
+    fun saveProvider(provider: Provider, apiKey: String, model: String, base: String, select: Boolean) {
+        val edit = prefs.edit()
+            .putString("${provider.id}_key", apiKey)
+            .putString("${provider.id}_model", model)
+            .putString("${provider.id}_base", base)
+        if (select) edit.putString("provider", provider.id)
+        edit.apply()
     }
 
     fun lastProvider(): String = prefs.getString("provider", Provider.OPENAI.id) ?: Provider.OPENAI.id

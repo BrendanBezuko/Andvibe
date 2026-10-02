@@ -10,5 +10,7 @@ enum class Provider(
     ANTHROPIC("anthropic", "Anthropic", "claude-sonnet-5", "https://api.anthropic.com"),
     GEMINI("gemini", "Gemini", "gemini-3.8-flash", "https://generativelanguage.googleapis.com/v1beta"),
     GROK("grok", "Grok", "grok-4.6", "https://api.x.ai/v1"),
+    OPENROUTER("openrouter", "OpenRouter", "anthropic/claude-sonnet-5", "https://openrouter.ai/api/v1"),
+    CURSOR("cursor", "Cursor", "composer-2.5", "https://api.cursor.com"),
     CUSTOM("custom", "Custom", "", "")
 }

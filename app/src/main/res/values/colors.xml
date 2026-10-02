@@ -1,12 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#FF121212</color>
-    <color name="panel">#FF1E1E1E</color>
-    <color name="ink">#FFE8EAED</color>
-    <color name="muted">#FF9AA0A6</color>
-    <color name="accent">#FF8AB4F8</color>
-    <color name="meter_red">#FFFF2D2D</color>
-    <color name="meter_green">#FF39FF6A</color>
+    <color name="bg">#FF0D1117</color>
+    <color name="panel">#FF161B22</color>
+    <color name="ink">#FFE6EDF3</color>
+    <color name="muted">#FF8B949E</color>
+    <color name="accent">#FF58A6FF</color>
+    <color name="line">#FF30363D</color>
+    <color name="btn">#FF238636</color>
+    <color name="tape">#FF010409</color>
+    <color name="tape_ink">#FFC9D1D9</color>
+    <color name="bid">#FF3FB950</color>
+    <color name="ask">#FFF85149</color>
+    <color name="quote">#FFD29922</color>
+    <color name="meter_red">#FFF85149</color>
+    <color name="meter_green">#FF3FB950</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 </resources>

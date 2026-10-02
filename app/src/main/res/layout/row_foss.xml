@@ -4,29 +4,31 @@
     android:layout_height="wrap_content"
     android:layout_marginBottom="8dp"
     android:background="@drawable/bg_card"
+    android:clickable="true"
+    android:focusable="true"
     android:orientation="vertical"
-    android:padding="8dp">
+    android:padding="10dp">
 
     <TextView
-        android:id="@+id/cardTitle"
+        android:id="@+id/fossName"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:ellipsize="end"
-        android:fontFamily="monospace"
-        android:includeFontPadding="false"
-        android:maxLines="3"
-        android:textColor="@color/ink"
+        android:textColor="@color/accent"
         android:textSize="14sp" />
 
     <TextView
-        android:id="@+id/cardBody"
+        android:id="@+id/fossMeta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textColor="@color/muted"
+        android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/fossWhy"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:ellipsize="end"
-        android:fontFamily="monospace"
-        android:includeFontPadding="false"
-        android:maxLines="6"
-        android:textColor="@color/muted"
-        android:textSize="12sp" />
+        android:textColor="@color/ink"
+        android:textSize="13sp" />
 </LinearLayout>

@@ -75,8 +75,8 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:cacheColorHint="@android:color/transparent"
-            android:divider="@android:color/transparent"
-            android:dividerHeight="0dp" />
+            android:divider="@color/line"
+            android:dividerHeight="1dp" />
 
         <TextView
             android:id="@+id/filesEmpty"
@@ -92,7 +92,7 @@
             android:id="@+id/editor"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@color/panel"
+            android:background="@color/tape"
             android:fontFamily="monospace"
             android:gravity="top|start"
             android:importantForAutofill="no"

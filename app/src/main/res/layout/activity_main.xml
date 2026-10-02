@@ -71,13 +71,13 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#FF2A2A2A" />
+        android:background="@color/line" />
 
     <LinearLayout
         android:id="@+id/usageBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/bg"
+        android:background="@color/panel"
         android:gravity="center_vertical"
         android:minHeight="36dp"
         android:orientation="horizontal"
@@ -95,8 +95,8 @@
             android:includeFontPadding="false"
             android:letterSpacing="0.06"
             android:text="BOARD"
-            android:textColor="@color/ink"
-            android:textSize="12sp" />
+            android:textColor="@color/muted"
+            android:textSize="11sp" />
 
         <TextView
             android:id="@+id/openWorkspace"
@@ -138,11 +138,17 @@
             android:textStyle="bold" />
     </LinearLayout>
 
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/line" />
+
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/panel"
+        android:background="@color/bg"
+        app:elevation="0dp"
         app:itemIconTint="@color/nav_tint"
         app:itemTextColor="@color/nav_tint"
         app:labelVisibilityMode="labeled"
