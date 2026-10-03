@@ -24,8 +24,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.example.andvibe.databinding.ActivityMainBinding
+import com.example.andvibe.databinding.RowApkBinding
 import com.example.andvibe.databinding.RowCardBinding
 import com.example.andvibe.databinding.RowFossBinding
+import com.example.andvibe.databinding.RowNewsBinding
 import com.example.andvibe.databinding.RowGitFileBinding
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.tabs.TabLayout
@@ -112,6 +114,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         setupConsole()
         setupSettings()
         setupFiles()
+        setupSearch()
         setupGit()
         setupVibe()
         setupBuild()
@@ -236,6 +239,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     override fun onBuild() {
+        renderSavedApks()
         val scroll = binding.buildPage.buildScroll
         val child = scroll.getChildAt(0)
         val nearBottom = child == null || child.bottom <= scroll.height + scroll.scrollY + 160
@@ -243,7 +247,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.buildPage.buildLog.text = text
         val root = runCatching { AppState.projectRoot() }.getOrNull()
         binding.buildPage.projectLine.text = if (root == null) {
-            "No repo yet. Clone one in Console."
+            "No repo yet. Clone one from Search."
         } else {
             "${RepoFiles.display(root, AppState.reposDir)} — ${JsRunner.detect(root)}"
         }
@@ -685,6 +689,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         })
         page.saveSecrets.setOnClickListener { saveSecrets() }
         page.saveVariables.setOnClickListener { saveVariables() }
+        buildVault()
+    }
+
+    private fun setupSearch() {
+        val page = binding.searchPage
         page.findGo.setOnClickListener { findRepos() }
         page.findQuery.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE) {
@@ -694,8 +703,37 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 false
             }
         }
-        buildVault()
         renderFind()
+        ensureFossFeed()
+        page.searchTabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) {
+                AppState.findNewsTab = tab.position == 1
+                page.findQuery.hint = if (AppState.findNewsTab) "Latest technology" else "What kind of project?"
+                if (AppState.findNewsTab) ensureFossFeed()
+                renderFind()
+            }
+            override fun onTabUnselected(tab: TabLayout.Tab) {}
+            override fun onTabReselected(tab: TabLayout.Tab) {}
+        })
+    }
+
+    private fun ensureFossFeed() {
+        if (!FossFeed.stale(this) || AppState.feedBusy) return
+        AppState.feedBusy = true
+        if (AppState.findBrief.isBlank()) {
+            AppState.findNote = "Refreshing the daily FOSS cache…"
+            if (AppState.tab == AppState.Tab.SEARCH) renderFind()
+        }
+        AppState.io.execute {
+            val note = runCatching { FossFeed.refresh(applicationContext) }.getOrElse {
+                it.message ?: "cache failed"
+            }
+            AppState.feedBusy = false
+            if (AppState.findBrief.isBlank()) AppState.findNote = note
+            runOnUiThread {
+                if (!isFinishing && AppState.tab == AppState.Tab.SEARCH) renderFind()
+            }
+        }
     }
 
     private fun showConsoleTab(index: Int) {
@@ -872,7 +910,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun findRepos() {
         if (AppState.findBusy) return
-        val query = binding.consolePage.findQuery.text?.toString()?.trim().orEmpty()
+        val query = binding.searchPage.findQuery.text?.toString()?.trim().orEmpty().ifBlank {
+            if (AppState.findNewsTab) "latest technology and open-source software in the news" else ""
+        }
         if (query.isEmpty()) {
             AppState.findNote = "Say what you want to find."
             renderFind()
@@ -885,17 +925,21 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val base = store.get(provider, "base", provider.defaultBase)
         AppState.findBusy = true
         AppState.findHits = emptyList()
-        AppState.findNote = "Searching GitHub, GitLab, and Codeberg…"
+        AppState.findNews = emptyList()
+        AppState.findBrief = ""
+        AppState.findNote = "Searching the web, then checking GitHub, GitLab, Codeberg, and SourceHut…"
         renderFind()
         DebugLog.step("find", "start chars=${query.length} provider=${provider.id}")
         AppState.io.execute {
             val result = try {
-                FossSearch.search(query, provider, key, model, base)
+                FossSearch.search(query, provider, key, model, base, FossFeed.matching(this, query))
             } catch (t: Throwable) {
                 DebugLog.step("find", "fail ${t.javaClass.simpleName}: ${t.message}")
-                FossSearch.SearchResult(emptyList(), t.message ?: "search failed")
+                FossSearch.SearchResult(emptyList(), emptyList(), "", t.message ?: "search failed")
             }
             AppState.findHits = result.hits
+            AppState.findNews = result.news
+            AppState.findBrief = result.brief
             AppState.findNote = result.note
             AppState.findBusy = false
             DebugLog.step("find", "done hits=${result.hits.size}")
@@ -906,22 +950,93 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun renderFind() {
-        val page = binding.consolePage
+        val page = binding.searchPage
         page.findGo.isEnabled = !AppState.findBusy
-        page.findGo.text = if (AppState.findBusy) "Finding…" else "Find"
+        page.findGo.text = if (AppState.findBusy) "Searching…" else "Search"
         val note = AppState.findNote
-        page.findStatus.text = note
-        page.findStatus.visibility = if (note.isBlank()) View.GONE else View.VISIBLE
-        val hits = AppState.findHits
-        page.findScroll.visibility = if (hits.isEmpty()) View.GONE else View.VISIBLE
+        val model = store.get(currentProvider, "model", currentProvider.defaultModel).ifBlank { currentProvider.defaultModel }
+        page.findStatus.text = when {
+            AppState.findBrief.isNotBlank() -> AppState.findBrief
+            AppState.findNewsTab -> AppState.findNote.ifBlank { FossFeed.status(this) }
+            note.isNotBlank() -> note
+            else -> "${currentProvider.label} · $model"
+        }
+        page.findStatus.visibility = View.VISIBLE
+        page.findScroll.visibility = View.VISIBLE
         page.findResults.removeAllViews()
-        for (hit in hits) {
-            val row = RowFossBinding.inflate(layoutInflater, page.findResults, false)
-            row.fossName.text = hit.name
-            row.fossMeta.text = "${hostOf(hit.page)} · ${hit.stars} stars"
-            row.fossWhy.text = hit.why.ifBlank { hit.blurb }
-            row.root.setOnClickListener { downloadHit(hit) }
-            page.findResults.addView(row.root)
+        if (AppState.findNewsTab) {
+            val cached = FossFeed.projects(this)
+            if (cached.isNotEmpty()) {
+                page.findResults.addView(sectionLabel("This week"))
+                for (hit in cached) page.findResults.addView(repoRow(hit))
+            }
+            var group = ""
+            for (channel in FossFeed.channels) {
+                if (channel.group != group) {
+                    group = channel.group
+                    page.findResults.addView(sectionLabel(group))
+                }
+                val row = RowNewsBinding.inflate(layoutInflater, page.findResults, false)
+                row.newsTitle.text = channel.name
+                row.newsMeta.text = channel.detail
+                row.newsSummary.visibility = View.GONE
+                row.root.setOnClickListener { openNews(channel.url) }
+                page.findResults.addView(row.root)
+            }
+            if (AppState.findNews.isNotEmpty()) {
+                page.findResults.addView(sectionLabel("From the web"))
+                for (story in AppState.findNews) {
+                    val row = RowNewsBinding.inflate(layoutInflater, page.findResults, false)
+                    row.newsTitle.text = story.title
+                    row.newsMeta.text = story.source.ifBlank { hostOf(story.url) }
+                    row.newsSummary.text = story.summary
+                    row.root.setOnClickListener { openNews(story.url) }
+                    val repo = story.repo
+                    if (repo != null) {
+                        row.newsClone.visibility = View.VISIBLE
+                        row.newsClone.text = "Clone ${repo.name}"
+                        row.newsClone.setOnClickListener { downloadHit(repo) }
+                    }
+                    page.findResults.addView(row.root)
+                }
+            }
+        } else {
+            for (hit in AppState.findHits) page.findResults.addView(repoRow(hit))
+        }
+    }
+
+    private fun sectionLabel(text: String): TextView {
+        return TextView(this).apply {
+            this.text = text
+            setTextColor(getColor(R.color.muted))
+            textSize = 12f
+            setPadding(0, dp(14), 0, dp(4))
+        }
+    }
+
+    private fun repoRow(hit: FossSearch.RepoHit): View {
+        val row = RowFossBinding.inflate(layoutInflater, null, false)
+        row.fossName.text = hit.name
+        val source = hit.why
+        val fromCache = source == "Codeberg" || source == "GitLab" ||
+            source.startsWith("GitHub") || source.startsWith("Topic:")
+        row.fossMeta.text = when {
+            fromCache && hit.stars > 0 -> "$source · ${hit.stars} stars"
+            fromCache -> source
+            hit.stars > 0 -> "${hostOf(hit.page)} · ${hit.stars} stars"
+            else -> hostOf(hit.page)
+        }
+        row.fossWhy.text = if (fromCache) hit.blurb else hit.why.ifBlank { hit.blurb }
+        row.root.setOnClickListener { downloadHit(hit) }
+        return row.root
+    }
+
+    private fun openNews(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (t: Throwable) {
+            AppState.findNote = t.message ?: "could not open the story"
+            renderFind()
         }
     }
 
@@ -935,6 +1050,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             "github.com" -> "GitHub"
             "gitlab.com" -> "GitLab"
             "codeberg.org" -> "Codeberg"
+            "git.sr.ht" -> "SourceHut"
             else -> host ?: "repo"
         }
     }
@@ -1351,6 +1467,45 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
     }
 
+    private var shownApks = ""
+
+    private fun renderSavedApks() {
+        val files = ApkLibrary.list(this)
+        if (AppState.lastApk?.let { File(it).isFile } != true) {
+            AppState.lastApk = files.firstOrNull()?.absolutePath
+        }
+        val key = files.joinToString { "${it.absolutePath}:${it.length()}" }
+        val list = binding.buildPage.savedApks
+        if (key == shownApks && list.childCount == files.size) return
+        shownApks = key
+        list.removeAllViews()
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+        for (file in files) {
+            val row = RowApkBinding.inflate(layoutInflater, list, false)
+            row.apkName.text = file.name
+            row.apkMeta.text = "${stamp.format(Date(file.lastModified()))} · ${file.length() / 1024} KB"
+            row.apkInstall.setOnClickListener {
+                AppState.lastApk = file.absolutePath
+                installBuiltApk()
+            }
+            row.apkDelete.setOnClickListener { confirmDeleteApk(file) }
+            list.addView(row.root)
+        }
+    }
+
+    private fun confirmDeleteApk(file: File) {
+        AlertDialog.Builder(this)
+            .setMessage("Delete ${file.name}?")
+            .setPositiveButton("Delete") { _, _ ->
+                if (file.absolutePath == AppState.lastApk) AppState.lastApk = null
+                file.delete()
+                shownApks = ""
+                onBuild()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun installBuiltApk() {
         val path = AppState.lastApk
         val file = path?.let { File(it) }
@@ -1385,6 +1540,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             if (workspaceOpen) closeWorkspace()
             val tab = when (item.itemId) {
                 R.id.nav_files -> AppState.Tab.FILES
+                R.id.nav_search -> AppState.Tab.SEARCH
                 R.id.nav_git -> AppState.Tab.GIT
                 R.id.nav_vibe -> AppState.Tab.VIBE
                 R.id.nav_build -> AppState.Tab.BUILD
@@ -1394,6 +1550,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             applyTab(tab)
             when (tab) {
                 AppState.Tab.BUILD -> onBuild()
+                AppState.Tab.SEARCH -> {
+                    renderFind()
+                    ensureFossFeed()
+                }
                 AppState.Tab.GIT -> if (AppState.gitDetail == null) refreshGit()
                 AppState.Tab.FILES -> if (!editing) refreshFileList()
                 else -> Unit
@@ -1408,6 +1568,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         applyTab(AppState.tab)
         val navId = when (AppState.tab) {
             AppState.Tab.FILES -> R.id.nav_files
+            AppState.Tab.SEARCH -> R.id.nav_search
             AppState.Tab.GIT -> R.id.nav_git
             AppState.Tab.VIBE -> R.id.nav_vibe
             AppState.Tab.BUILD -> R.id.nav_build
@@ -1420,6 +1581,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.tab = tab
         binding.consolePage.root.visibility = if (tab == AppState.Tab.CONSOLE) View.VISIBLE else View.GONE
         binding.filesPage.root.visibility = if (tab == AppState.Tab.FILES) View.VISIBLE else View.GONE
+        binding.searchPage.root.visibility = if (tab == AppState.Tab.SEARCH) View.VISIBLE else View.GONE
         binding.gitPage.root.visibility = if (tab == AppState.Tab.GIT) View.VISIBLE else View.GONE
         binding.vibePage.root.visibility = if (tab == AppState.Tab.VIBE) View.VISIBLE else View.GONE
         binding.buildPage.root.visibility = if (tab == AppState.Tab.BUILD) View.VISIBLE else View.GONE
@@ -1441,7 +1603,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             files.map { if (it.isDirectory) it.name + "/" else it.name }
         )
         binding.filesPage.filesEmpty.text = AppState.downloadNote ?: if (cwd.canonicalPath == repos.canonicalPath) {
-            "Find a repo on Console, or tap Open for a folder already on this phone."
+            "Find a repo on Search, or tap Open for a folder already on this phone."
         } else {
             "Empty folder"
         }

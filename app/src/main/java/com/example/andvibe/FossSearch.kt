@@ -18,9 +18,22 @@ object FossSearch {
         val why: String
     )
 
-    data class SearchResult(val hits: List<RepoHit>, val note: String)
+    data class NewsHit(
+        val title: String,
+        val url: String,
+        val source: String,
+        val summary: String,
+        val repo: RepoHit?
+    )
 
-    private val hosts = setOf("github.com", "gitlab.com", "codeberg.org")
+    data class SearchResult(
+        val hits: List<RepoHit>,
+        val news: List<NewsHit>,
+        val brief: String,
+        val note: String
+    )
+
+    private val hosts = setOf("github.com", "gitlab.com", "codeberg.org", "git.sr.ht")
 
     private const val RANK = """
         You choose free and open-source repositories for someone about to download one onto a phone. Reply with one JSON object and nothing else:
@@ -28,15 +41,209 @@ object FossSearch {
         Use only URLs from the candidate list. Return at most 5 picks, best first. Prefer a close match, a permissive license, and a project people actually use. Do not invent repositories.
     """
 
+    private const val AGENT = """
+        You research open-source software and the technology news around it. You can search the web. Reply with one JSON object and nothing else:
+        {"brief":"what is current, in a few sentences","repos":[{"url":"https://github.com/owner/repo","why":"one sentence"}],"news":[{"title":"headline","url":"https://article","source":"publication","summary":"one sentence","repo":"https://github.com/owner/repo"}]}
+        Prefer repositories on github.com, gitlab.com, codeberg.org, and git.sr.ht, especially ones listed as known forge results when they match. Search the web before you answer. Use only URLs you found. At most 6 repos and 6 news items. Leave repo empty when a story is not about one repository. Do not invent a project or an article.
+    """
+
     fun search(
         query: String,
         provider: Provider,
         key: String,
         model: String,
+        base: String,
+        cached: List<RepoHit> = emptyList()
+    ): SearchResult {
+        val asked = query.trim().replace(Regex("\\s+"), " ").take(160)
+        if (asked.isBlank()) error("say what you want to find")
+        val known = merge(cached, knownChannels(asked))
+        if (key.isNotBlank() && model.isNotBlank() && provider != Provider.CURSOR) {
+            try {
+                val report = agent(asked, known, provider, key, model, base)
+                val repos = merge(report.repos, known)
+                if (repos.isNotEmpty() || report.news.isNotEmpty()) {
+                    return SearchResult(repos, report.news, report.brief, "Tap a repo to clone it. Tap a story to open it.")
+                }
+            } catch (t: Throwable) {
+                if (known.isEmpty()) error(t.message ?: "search failed")
+                return SearchResult(
+                    known.take(6),
+                    emptyList(),
+                    "",
+                    "${t.message ?: "web search failed"}. Showing GitHub, GitLab, and Codeberg."
+                )
+            }
+        }
+        if (known.isEmpty()) error("no matches on GitHub, GitLab, or Codeberg")
+        val note = if (key.isBlank() || provider == Provider.CURSOR) {
+            "Add a web-search provider key in Settings. These are from GitHub, GitLab, and Codeberg."
+        } else {
+            "Tap a repo to clone it."
+        }
+        return SearchResult(known.take(6), emptyList(), "", note)
+    }
+
+    private data class AgentReport(val brief: String, val repos: List<RepoHit>, val news: List<NewsHit>)
+
+    private fun agent(
+        query: String,
+        known: List<RepoHit>,
+        provider: Provider,
+        key: String,
+        model: String,
+        base: String
+    ): AgentReport {
+        val catalog = if (known.isEmpty()) {
+            "(none)"
+        } else {
+            known.joinToString("\n") { hit ->
+                val license = hit.license.ifBlank { "unknown license" }
+                "${hit.page} | ${hit.stars} stars | $license | ${hit.blurb}"
+            }
+        }
+        val raw = AiClient.research(
+            AGENT.trimIndent(),
+            "Request: $query\n\nKnown forge results:\n$catalog",
+            provider,
+            key,
+            model,
+            base
+        )
+        val json = JSONObject(extractJson(raw))
+        val repos = mutableListOf<RepoHit>()
+        val picks = json.optJSONArray("repos") ?: JSONArray()
+        for (i in 0 until picks.length()) {
+            if (repos.size >= 6) break
+            val pick = picks.optJSONObject(i) ?: continue
+            val url = pick.optString("url")
+            if (repos.any { same(it, url) }) continue
+            val hit = resolve(url, clean(pick.optString("why")).take(180)) ?: continue
+            repos.add(hit)
+        }
+        val news = mutableListOf<NewsHit>()
+        val stories = json.optJSONArray("news") ?: JSONArray()
+        for (i in 0 until stories.length()) {
+            if (news.size >= 6) break
+            val story = stories.optJSONObject(i) ?: continue
+            val page = story.optString("url").trim()
+            if (!page.startsWith("https://")) continue
+            val repo = resolve(story.optString("repo"), "")
+            news.add(
+                NewsHit(
+                    clean(story.optString("title")).take(140).ifBlank { page },
+                    page,
+                    clean(story.optString("source")).take(40),
+                    clean(story.optString("summary")).take(220),
+                    repo
+                )
+            )
+        }
+        return AgentReport(clean(json.optString("brief")).take(700), repos, news)
+    }
+
+    private fun knownChannels(query: String): List<RepoHit> {
+        val found = mutableListOf<RepoHit>()
+        for (load in listOf({ github(query) }, { gitlab(query) }, { codeberg(query) })) {
+            try {
+                found.addAll(load())
+            } catch (_: Throwable) {
+            }
+        }
+        return dedupe(found).sortedByDescending { it.stars }.take(12)
+    }
+
+    private fun merge(preferred: List<RepoHit>, extra: List<RepoHit>): List<RepoHit> {
+        val out = mutableListOf<RepoHit>()
+        for (hit in preferred + extra) {
+            if (out.any { same(it, hit.page) }) continue
+            out.add(hit)
+            if (out.size >= 16) break
+        }
+        return out
+    }
+
+    private fun resolve(url: String, why: String): RepoHit? {
+        val key = repoKey(url)
+        if (key.isBlank()) return null
+        val host = key.substringBefore('/')
+        val path = key.substringAfter('/').split('/').filter { it.isNotBlank() }.take(2).joinToString("/")
+        if (!path.contains('/')) return null
+        val looked = try {
+            when (host) {
+                "github.com" -> githubRepo(path)
+                "gitlab.com" -> gitlabRepo(path)
+                "codeberg.org" -> codebergRepo(path)
+                "git.sr.ht" -> sourcehutRepo(path)
+                else -> null
+            }
+        } catch (_: Throwable) {
+            null
+        }
+        if (looked != null) return looked.copy(why = why.ifBlank { looked.blurb })
+        return hit(path, "https://$host/$path.git", "https://$host/$path", 0, "", "")?.copy(why = why)
+    }
+
+    private fun githubRepo(path: String): RepoHit? {
+        val item = JSONObject(getText("https://api.github.com/repos/$path"))
+        val license = item.optJSONObject("license")?.optString("spdx_id").orEmpty()
+        return hit(
+            item.optString("full_name").ifBlank { path },
+            item.optString("clone_url").ifBlank { "https://github.com/$path.git" },
+            item.optString("html_url").ifBlank { "https://github.com/$path" },
+            item.optInt("stargazers_count"),
+            item.optString("description"),
+            if (license == "NOASSERTION") "" else license
+        )
+    }
+
+    private fun gitlabRepo(path: String): RepoHit? {
+        val item = JSONObject(getText("https://gitlab.com/api/v4/projects/${enc(path)}"))
+        return hit(
+            item.optString("path_with_namespace").ifBlank { path },
+            item.optString("http_url_to_repo"),
+            item.optString("web_url"),
+            item.optInt("star_count"),
+            item.optString("description"),
+            ""
+        )
+    }
+
+    private fun sourcehutRepo(path: String): RepoHit? {
+        val user = path.substringBefore('/')
+        val name = path.substringAfter('/').substringBefore('/')
+        if (!user.startsWith("~") || name.isBlank()) return null
+        val item = JSONObject(getText("https://git.sr.ht/api/$user/repos/$name"))
+        val repoName = item.optString("name").ifBlank { name }
+        return hit(
+            "$user/$repoName",
+            "https://git.sr.ht/$user/$repoName",
+            "https://git.sr.ht/$user/$repoName",
+            0,
+            item.optString("description"),
+            ""
+        )
+    }
+
+    private fun codebergRepo(path: String): RepoHit? {
+        val item = JSONObject(getText("https://codeberg.org/api/v1/repos/$path"))
+        return hit(
+            item.optString("full_name").ifBlank { path },
+            item.optString("clone_url"),
+            item.optString("html_url"),
+            item.optInt("stars_count"),
+            item.optString("description"),
+            ""
+        )
+    }
+
+    private fun forge(
+        asked: String,
+        provider: Provider,
+        key: String,
+        model: String,
         base: String
     ): SearchResult {
-        val asked = query.trim().replace(Regex("\\s+"), " ").take(120)
-        if (asked.isBlank()) error("say what you want to find")
         val found = mutableListOf<RepoHit>()
         val problems = mutableListOf<String>()
         for ((label, load) in listOf(
@@ -58,20 +265,24 @@ object FossSearch {
         if (key.isBlank() || model.isBlank()) {
             return SearchResult(
                 hits.take(6).map { it.copy(why = it.blurb) },
-                "Add an API key in Settings to rank these. Tap one to download it."
+                emptyList(),
+                "",
+                "Add an API key in Settings to search the web. Tap one to clone it."
             )
         }
         return try {
             val ranked = rank(asked, hits, provider, key, model, base)
             if (ranked.isEmpty()) {
-                SearchResult(hits.take(6).map { it.copy(why = it.blurb) }, "Tap one to download it.")
+                SearchResult(hits.take(6).map { it.copy(why = it.blurb) }, emptyList(), "", "Tap one to clone it.")
             } else {
-                SearchResult(ranked, "Ranked for this search. Tap one to download it.")
+                SearchResult(ranked, emptyList(), "", "Tap one to clone it.")
             }
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             SearchResult(
                 hits.take(6).map { it.copy(why = it.blurb) },
-                "Could not rank these. Tap one to download it."
+                emptyList(),
+                "",
+                "Tap one to clone it."
             )
         }
     }

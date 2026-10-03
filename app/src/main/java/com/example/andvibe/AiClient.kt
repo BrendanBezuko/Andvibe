@@ -112,6 +112,39 @@ object AiClient {
         return reply.text.trim()
     }
 
+    fun research(
+        system: String,
+        user: String,
+        provider: Provider,
+        key: String,
+        model: String,
+        base: String
+    ): String {
+        if (user.length > 16_000) error("prompt is too long")
+        if (key.isBlank()) error("add an API key in Settings")
+        if (model.isBlank()) error("set a model name")
+        if (provider == Provider.CURSOR) error("Cursor cannot search the web")
+        val baseUrl = base.ifBlank { provider.defaultBase }
+        if (baseUrl.isBlank()) error("set a base URL")
+        val messages = listOf("user" to user)
+        val reply = when (provider) {
+            Provider.ANTHROPIC -> anthropic(baseUrl, key, model, messages, system, search = true)
+            Provider.GEMINI -> gemini(baseUrl, key, model, messages, system, search = true)
+            else -> try {
+                responses(baseUrl, key, model, messages, system, extraHeaders(provider), search = true)
+            } catch (e: IllegalStateException) {
+                chatCompletions(baseUrl, key, model, messages, system, extraHeaders(provider), search = true)
+            }
+        }
+        val charged = if (reply.input == 0L && reply.output == 0L) {
+            reply.copy(input = guessTokens(user.length + system.length), output = guessTokens(reply.text.length))
+        } else {
+            reply
+        }
+        WorkspaceStore.addUse(model, charged.input, charged.output)
+        return reply.text.trim()
+    }
+
     private fun buildPrompt(root: File, cwd: File, open: File?, instruction: String): String {
         val files = chooseFiles(root, open)
         return buildString {
@@ -355,7 +388,8 @@ object AiClient {
         model: String,
         messages: List<Pair<String, String>>,
         system: String = systemPrompt,
-        headers: Map<String, String> = emptyMap()
+        headers: Map<String, String> = emptyMap(),
+        search: Boolean = false
     ): Reply {
         fun once(field: String): Reply {
             val body = JSONObject()
@@ -367,6 +401,13 @@ object AiClient {
             }
             body.put("messages", arr)
             body.put(field, 8192)
+            if (search) {
+                if (base.contains("openrouter.ai")) {
+                    body.put("plugins", JSONArray().put(JSONObject().put("id", "web")))
+                } else {
+                    body.put("search_parameters", JSONObject().put("mode", "on"))
+                }
+            }
             val raw = post(chatUrl(base), mapOf("Authorization" to "Bearer $key") + headers, body.toString())
             val use = readUse(raw)
             return Reply(openAiText(raw), use.first, use.second)
@@ -389,7 +430,8 @@ object AiClient {
         model: String,
         messages: List<Pair<String, String>>,
         system: String = systemPrompt,
-        headers: Map<String, String> = emptyMap()
+        headers: Map<String, String> = emptyMap(),
+        search: Boolean = false
     ): Reply {
         val body = JSONObject()
         body.put("model", model)
@@ -400,6 +442,9 @@ object AiClient {
             input.put(JSONObject().put("role", role).put("content", content))
         }
         body.put("input", input)
+        if (search) {
+            body.put("tools", JSONArray().put(JSONObject().put("type", "web_search")))
+        }
         val raw = post(responsesUrl(base), mapOf("Authorization" to "Bearer $key") + headers, body.toString())
         val use = readUse(raw)
         return Reply(responsesText(raw), use.first, use.second)
@@ -410,7 +455,8 @@ object AiClient {
         key: String,
         model: String,
         messages: List<Pair<String, String>>,
-        system: String = systemPrompt
+        system: String = systemPrompt,
+        search: Boolean = false
     ): Reply {
         val body = JSONObject()
         body.put("model", model)
@@ -421,11 +467,20 @@ object AiClient {
             arr.put(JSONObject().put("role", role).put("content", content))
         }
         body.put("messages", arr)
-        val text = post(
-            anthropicUrl(base),
-            mapOf("x-api-key" to key, "anthropic-version" to "2023-06-01"),
-            body.toString()
-        )
+        val headers = mutableMapOf("x-api-key" to key, "anthropic-version" to "2023-06-01")
+        if (search) {
+            body.put(
+                "tools",
+                JSONArray().put(
+                    JSONObject()
+                        .put("type", "web_search_20250305")
+                        .put("name", "web_search")
+                        .put("max_uses", 5)
+                )
+            )
+            headers["anthropic-beta"] = "web-search-2025-03-05"
+        }
+        val text = post(anthropicUrl(base), headers, body.toString())
         val use = readUse(text)
         val content = JSONObject(text).optJSONArray("content") ?: error("empty response")
         val out = StringBuilder()
@@ -441,7 +496,8 @@ object AiClient {
         key: String,
         model: String,
         messages: List<Pair<String, String>>,
-        system: String = systemPrompt
+        system: String = systemPrompt,
+        search: Boolean = false
     ): Reply {
         val modelId = model.removePrefix("models/").trim()
         val body = JSONObject()
@@ -458,6 +514,9 @@ object AiClient {
             )
         }
         body.put("contents", contents)
+        if (search) {
+            body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+        }
         body.put("generationConfig", JSONObject().put("maxOutputTokens", 8192))
         val text = post(geminiUrl(base, modelId), mapOf("x-goog-api-key" to key), body.toString())
         val use = readUse(text)

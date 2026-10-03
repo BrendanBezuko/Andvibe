@@ -26,6 +26,13 @@
             android:visibility="gone" />
 
         <include
+            android:id="@+id/searchPage"
+            layout="@layout/page_search"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <include
             android:id="@+id/gitPage"
             layout="@layout/page_git"
             android:layout_width="match_parent"

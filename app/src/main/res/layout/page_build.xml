@@ -63,15 +63,34 @@
         android:layout_weight="1"
         android:fillViewport="true">
 
-        <TextView
-            android:id="@+id/buildLog"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:lineSpacingExtra="2dp"
-            android:text=""
-            android:textColor="@color/ink"
-            android:textIsSelectable="true"
-            android:textSize="13sp" />
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Saved APKs"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:id="@+id/savedApks"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <TextView
+                android:id="@+id/buildLog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:fontFamily="monospace"
+                android:lineSpacingExtra="2dp"
+                android:textColor="@color/ink"
+                android:textIsSelectable="true"
+                android:textSize="13sp" />
+        </LinearLayout>
     </ScrollView>
 </LinearLayout>

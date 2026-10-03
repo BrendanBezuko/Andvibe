@@ -8,7 +8,7 @@ import java.util.ArrayDeque
 import java.util.concurrent.Executors
 
 object AppState {
-    enum class Tab { CONSOLE, FILES, GIT, VIBE, BUILD }
+    enum class Tab { CONSOLE, FILES, SEARCH, GIT, VIBE, BUILD }
 
     val io = Executors.newSingleThreadExecutor()
     val history = ArrayDeque<Pair<String, String>>()
@@ -23,8 +23,12 @@ object AppState {
     @Volatile var vibeBusy = false
     var vibeResult = ""
     var writtenPaths: List<String> = emptyList()
+    @Volatile var feedBusy = false
     @Volatile var findBusy = false
     var findHits: List<FossSearch.RepoHit> = emptyList()
+    var findNews: List<FossSearch.NewsHit> = emptyList()
+    var findBrief: String = ""
+    var findNewsTab = false
     var findNote: String = ""
     @Volatile var downloadBusy = false
     @Volatile var downloadNote: String? = null
@@ -57,6 +61,7 @@ object AppState {
         } else {
             log("opened ${RepoFiles.display(cwd, reposDir)}")
         }
+        lastApk = ApkLibrary.list(appContext).firstOrNull()?.absolutePath
         ready = true
     }
 

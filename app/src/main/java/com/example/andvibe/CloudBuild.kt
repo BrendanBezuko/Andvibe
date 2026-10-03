@@ -226,12 +226,10 @@ object CloudBuild {
     }
 
     private fun saveResult(context: Context, tmp: File, type: String, suggested: String): File {
-        val outDir = context.getExternalFilesDir("apk") ?: File(context.filesDir, "apk")
-        outDir.mkdirs()
         val zipResult = type.contains("zip") || suggested.endsWith(".zip")
         if (!zipResult) {
-            val dest = File(outDir, safe(suggested))
-            tmp.copyTo(dest, overwrite = true)
+            val dest = ApkLibrary.place(context, suggested)
+            tmp.copyTo(dest, overwrite = false)
             DebugLog.step("cloud.save", "apk path=${dest.absolutePath} bytes=${dest.length()}")
             return dest
         }
@@ -239,7 +237,7 @@ object CloudBuild {
             val entries = zip.entries().toList().filter { !it.isDirectory && it.name.endsWith(".apk") }
             val pick = entries.firstOrNull { it.name.endsWith("app-debug.apk") } ?: entries.firstOrNull()
                 ?: error("Cloud Run returned a zip with no APK")
-            val dest = File(outDir, safe(File(pick.name).name))
+            val dest = ApkLibrary.place(context, File(pick.name).name)
             zip.getInputStream(pick).use { input -> dest.outputStream().use { input.copyTo(it) } }
             DebugLog.step("cloud.save", "apk path=${dest.absolutePath} bytes=${dest.length()} from=${pick.name}")
             return dest
