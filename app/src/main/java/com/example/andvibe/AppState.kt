@@ -1,12 +1,16 @@
 package com.example.andvibe
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import java.io.File
 import java.util.ArrayDeque
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 object AppState {
     enum class Tab { CONSOLE, BOARD, FILES, SEARCH, GIT, VIBE, BUILD }
@@ -152,6 +156,7 @@ object UiBridge {
         fun onProject()
         fun onMcp()
         fun onUsage()
+        fun onScreenshot(tab: AppState.Tab?, done: (Bitmap?) -> Unit)
     }
 
     var listener: Listener? = null
@@ -195,5 +200,24 @@ object UiBridge {
 
     fun usageUpdate() {
         main.post { listener?.onUsage() }
+    }
+
+    // Blocks the caller, so never call it from the main thread.
+    fun screenshot(tab: AppState.Tab?, timeoutMs: Long = 8_000): Bitmap? {
+        val latch = CountDownLatch(1)
+        val shot = AtomicReference<Bitmap?>(null)
+        main.post {
+            val target = listener
+            if (target == null) {
+                latch.countDown()
+            } else {
+                target.onScreenshot(tab) { bitmap ->
+                    shot.set(bitmap)
+                    latch.countDown()
+                }
+            }
+        }
+        if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) error("screenshot timed out")
+        return shot.get()
     }
 }

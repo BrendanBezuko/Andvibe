@@ -3,12 +3,17 @@
 
 The response is chunked application/x-ndjson. Gradle lines stream as
 they happen. The apk event names the byte length, and the raw APK
-follows that line. This service does not call a model or see an API key.
+follows that line. This service does not call a model or see the model
+API key.
+
+When VT_API_KEY is set, the APK is checked on VirusTotal before it is
+sent. Uploaded files are shared with VirusTotal's paying customers.
 
 Cloud Run's request body limit is 32MB. Dependencies are downloaded
 during the Gradle run, so the zip should be source plus the wrapper.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -19,6 +24,9 @@ import stat
 import subprocess
 import tempfile
 import threading
+import time
+import urllib.error
+import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -34,6 +42,12 @@ TIMEOUT = int(os.environ.get("BUILD_TIMEOUT", "3000"))
 BUILD_LOCK = threading.Lock()
 SKIP_PARTS = {".gradle", ".git", "build", ".idea", "__MACOSX"}
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+VT_KEY = os.environ.get("VT_API_KEY", "")
+VT_TIMEOUT = int(os.environ.get("VT_TIMEOUT", "240"))
+VT_API = "https://www.virustotal.com/api/v3"
+# The free tier allows 4 requests a minute.
+VT_POLL = 20
+VT_DIRECT_MAX = 32 * 1024 * 1024
 
 
 def authorized(header: str) -> bool:
@@ -126,6 +140,59 @@ def find_apks(root: Path, task: str) -> list[Path]:
     return sorted(preferred or found)
 
 
+def vt_request(method: str, target: str, body: bytes | None = None, headers: dict | None = None) -> dict:
+    url = target if target.startswith("https://") else VT_API + target
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method=method,
+        headers={"x-apikey": VT_KEY, "accept": "application/json", **(headers or {})},
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        return json.loads(resp.read() or b"{}")
+
+
+def vt_upload(name: str, body: bytes) -> str:
+    url = VT_API + "/files"
+    if len(body) > VT_DIRECT_MAX:
+        url = vt_request("GET", "/files/upload_url")["data"]
+    boundary = secrets.token_hex(16)
+    head = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{name}"\r\n'
+        "Content-Type: application/octet-stream\r\n\r\n"
+    ).encode()
+    tail = f"\r\n--{boundary}--\r\n".encode()
+    reply = vt_request(
+        "POST",
+        url,
+        head + body + tail,
+        {"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    return reply["data"]["id"]
+
+
+def vt_verdict(name: str, body: bytes, digest: str, note) -> tuple[dict, dict] | None:
+    try:
+        attrs = vt_request("GET", f"/files/{digest}")["data"]["attributes"]
+        if attrs.get("last_analysis_stats"):
+            note("VirusTotal already knows this file")
+            return attrs["last_analysis_stats"], attrs.get("last_analysis_results", {})
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+    analysis = vt_upload(name, body)
+    note(f"uploaded to VirusTotal, waiting up to {VT_TIMEOUT}s for the engines")
+    deadline = time.monotonic() + VT_TIMEOUT
+    while time.monotonic() < deadline:
+        time.sleep(VT_POLL)
+        attrs = vt_request("GET", f"/analyses/{analysis}")["data"]["attributes"]
+        if attrs.get("status") == "completed":
+            return attrs.get("stats", {}), attrs.get("results", {})
+        note(f"VirusTotal {attrs.get('status', 'queued')}")
+    return None
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -191,6 +258,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._emit({"event": "error", "text": "gradle finished but no APK was produced"})
                 return
             name, body = packed
+            self._scan(name, body)
             self._emit({"event": "apk", "name": name, "bytes": len(body)})
             self._raw(body)
         except Exception as exc:
@@ -288,6 +356,49 @@ class Handler(BaseHTTPRequestHandler):
             for path in apks:
                 out.write(path, path.name)
         return "apks.zip", packed.getvalue()
+
+    def _scan(self, name: str, body: bytes) -> None:
+        if not VT_KEY:
+            return
+        digest = hashlib.sha256(body).hexdigest()
+        link = f"https://www.virustotal.com/gui/file/{digest}"
+
+        def note(text: str) -> None:
+            self._emit({"event": "log", "text": text})
+
+        note(f"VirusTotal scan of {name} sha256 {digest}")
+        try:
+            verdict = vt_verdict(name, body, digest, note)
+        except Exception as exc:
+            print(f"virustotal error {exc}", flush=True)
+            note(f"VirusTotal scan skipped: {str(exc)[:300]}")
+            return
+        if verdict is None:
+            note(f"VirusTotal is still scanning. Check {link}")
+            return
+        stats, results = verdict
+        flagged = sorted(
+            f"{engine}: {result.get('result') or result.get('category')}"
+            for engine, result in results.items()
+            if result.get("category") in ("malicious", "suspicious")
+        )
+        malicious = stats.get("malicious", 0)
+        suspicious = stats.get("suspicious", 0)
+        clean = stats.get("undetected", 0) + stats.get("harmless", 0)
+        self._emit(
+            {
+                "event": "scan",
+                "engine": "virustotal",
+                "sha256": digest,
+                "stats": stats,
+                "flagged": flagged,
+                "link": link,
+                "text": f"VirusTotal: {malicious} malicious, {suspicious} suspicious, {clean} clean",
+            }
+        )
+        for line in flagged[:20]:
+            note(f"  {line}")
+        note(link)
 
     def _begin_stream(self) -> None:
         self._write_lock = threading.Lock()

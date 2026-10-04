@@ -3,10 +3,14 @@ package com.example.andvibe
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
@@ -14,6 +18,7 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
+import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -403,6 +408,38 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             renderChat()
             renderHistory()
         }
+    }
+
+    override fun onScreenshot(tab: AppState.Tab?, done: (Bitmap?) -> Unit) {
+        if (!::binding.isInitialized || isFinishing) {
+            done(null)
+            return
+        }
+        if (tab != null && (tab != AppState.tab || settingsOpen || workspaceOpen)) showTab(tab)
+        val root = window.decorView
+        root.postDelayed({ captureWindow(root, done) }, if (tab == null) 50L else 400L)
+    }
+
+    private fun captureWindow(root: View, done: (Bitmap?) -> Unit) {
+        if (root.width <= 0 || root.height <= 0) {
+            done(null)
+            return
+        }
+        val bitmap = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PixelCopy.request(window, bitmap, { result ->
+                if (result == PixelCopy.SUCCESS) done(bitmap) else done(drawWindow(root, bitmap))
+            }, Handler(Looper.getMainLooper()))
+        } else {
+            done(drawWindow(root, bitmap))
+        }
+    }
+
+    private fun drawWindow(root: View, bitmap: Bitmap): Bitmap {
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(getColor(R.color.bg))
+        root.draw(canvas)
+        return bitmap
     }
 
     override fun onProject() {

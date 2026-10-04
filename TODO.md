@@ -7,6 +7,7 @@
 ## Should have:
 - gitleaks or some other tool if you're pushing live repos
 - vulnerability scanner
+- MobSF static scan as a Build tab step: run the MobSF Docker image on Cloud Run like the builder, send each APK to its REST API, and show the report next to the VirusTotal result
 
 ## Could have:
 - Voice agent

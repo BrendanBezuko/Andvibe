@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="store/play-icon.png" alt="AndVibe logo" width="200" />
+</p>
+
 # AndVibe
 
 AndVibe is an Android app for cloning a repo, editing it with your own model key, and building it. JavaScript and HTML run on the phone. A project with `gradlew` is compiled on Cloud Run.
@@ -23,6 +27,15 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 `:app:installDebug` is the one to use. A plain `installDebug` also installs the shell module, which is the template named Built app, not AndVibe.
+
+## Icons
+
+`scripts/make_icons.py` makes every icon from `Neon Android &vibe Logo.png`: the launcher mipmaps, the website favicon, touch icons, manifest, and social image, and the Play icon and feature graphic in `store/`. Run it again after the logo changes.
+
+```bash
+python3 -m pip install pillow
+python3 scripts/make_icons.py
+```
 
 ## Console
 
@@ -188,6 +201,18 @@ Optional environment variables, comma-separated in `--set-env-vars`:
 | --- | --- | --- |
 | `BUILD_TOKEN` | empty | Bearer token required by `/build`. Empty rejects every build. |
 | `BUILD_TIMEOUT` | `3000` | Seconds for one Gradle run. |
+| `VT_API_KEY` | empty | VirusTotal API key. When set, each APK is scanned before it is sent and the verdict shows in the Build tab. Empty skips the scan. |
+| `VT_TIMEOUT` | `240` | Seconds to wait for VirusTotal results. After that the APK is sent with a link to the report. |
+
+To turn on the VirusTotal scan, add the key without touching `BUILD_TOKEN`. `--set-env-vars` replaces every variable, so use `--update-env-vars`:
+
+```bash
+gcloud run services update andvibe-build \
+  --region us-central1 \
+  --update-env-vars "VT_API_KEY=<virustotal-key>"
+```
+
+VirusTotal shares uploaded files with its paying customers. Leave the key unset for projects that must stay private. The free tier allows 4 requests a minute and 500 a day, which covers one build at a time.
 
 The Cloud Run request itself ends at 60 minutes (`--timeout 3600`). The phone stops waiting at 55 minutes. Leave AndVibe open until the APK path appears.
 
@@ -252,14 +277,15 @@ adb forward --list
 
 You want a line like `host-tcp:8765 tcp:8765`. Open AndVibe on the emulator or phone. In the app, Console → Settings should say **Listening on 127.0.0.1:8765**. If it says the port is in use, run the `adb reverse --remove` line above and tap **Try again**.
 
-Then in Cursor, open Settings → MCP (or the command palette, search for MCP) and reload the **andvibe** server. A green dot means Cursor reached the phone. The tools are `logs`, `build_log`, `console_log`, and `state`. `logs` can be filtered by area, such as `cloud`, `cloud.zip`, or `cloud.http`. A request time on the Settings screen means something connected.
+Then in Cursor, open Settings → MCP (or the command palette, search for MCP) and reload the **andvibe** server. A green dot means Cursor reached the phone. The tools are `logs`, `build_log`, `console_log`, `state`, and `screenshot`. `logs` can be filtered by area, such as `cloud`, `cloud.zip`, or `cloud.http`. `screenshot` can switch to a tab first (`tab: "vibe"`), returns the PNG, and saves it under `/sdcard/Android/data/com.example.andvibe/files/screenshots/` on the device. The result includes the `adb pull` line that copies it into `web/src/assets/screens/`. AndVibe has to be open on screen. A request time on the Settings screen means something connected.
 
 `adb forward` has to be set again after the device disconnects. If an emulator is not the only device attached, pass `-s emulator-5554` (or whichever serial `adb devices` shows) on the forward commands.
 
-Wireless debugging is the same ADB connection, so the same forward reaches AndVibe on a phone on the network. Pair from the phone's Wireless debugging screen with the pairing port, then connect with the port on that screen (`adb connect` without a port tries 5555 and is refused). When the emulator is also attached, forward only the phone. Its serial looks like `adb-…._adb-tls-connect._tcp`:
+Wireless debugging is the same ADB connection, so the same forward reaches AndVibe on a phone on the network. Pair from the phone's Wireless debugging screen with the pairing port, then connect with the port on that screen (`adb connect` without a port tries 5555 and is refused). When the emulator is also attached, forward only the phone. Run `adb devices` and copy the phone's serial from the first column. It looks like `adb-…._adb-tls-connect._tcp`:
 
 ```bash
-adb -s adb-41271FDJG0013A-KmdyYN._adb-tls-connect._tcp forward tcp:8765 tcp:8765
+adb devices
+adb -s <serial from adb devices> forward tcp:8765 tcp:8765
 ```
 
 Open AndVibe on that phone first. Cursor still uses `http://127.0.0.1:8765/mcp`. Run the forward again after the phone disconnects.

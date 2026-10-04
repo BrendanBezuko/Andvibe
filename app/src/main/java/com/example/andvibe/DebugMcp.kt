@@ -1,9 +1,12 @@
 package com.example.andvibe
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -221,11 +224,22 @@ object DebugMcp {
             .put(tool("build_log", "The Build tab text, including the Cloud Run upload and the APK path.", schema()))
             .put(tool("console_log", "The Console tab text.", schema()))
             .put(tool("state", "Current project, tab, busy flags, workspace, and last APK path. Does not include API keys.", schema()))
+            .put(tool("screenshot", "PNG of the AndVibe window. Returns the image and saves it on the device with an adb pull command to copy it to the computer. AndVibe must be open on screen.", schema(
+                "tab" to "Switch to this tab first: console, board, files, search, git, vibe, or build. Empty captures what is on screen now.",
+                "name" to "File name for the saved PNG, letters, digits, dash, and underscore. Default is the tab and a timestamp."
+            )))
     }
 
     private fun callTool(params: JSONObject?): JSONObject {
         val name = params?.optString("name").orEmpty()
         val args = params?.optJSONObject("arguments") ?: JSONObject()
+        if (name == "screenshot") {
+            return try {
+                screenshot(args.optString("tab", ""), args.optString("name", ""))
+            } catch (t: Throwable) {
+                toolError(t.message ?: t.javaClass.simpleName)
+            }
+        }
         val text = try {
             when (name) {
                 "logs" -> DebugLog.text(args.optString("area", ""), args.optInt("limit", 200))
@@ -238,6 +252,38 @@ object DebugMcp {
             return toolError(t.message ?: t.javaClass.simpleName)
         }
         return toolOk(text)
+    }
+
+    private fun screenshot(tabArg: String, nameArg: String): JSONObject {
+        val tab = tabArg.trim().takeIf { it.isNotEmpty() }?.let { raw ->
+            AppState.Tab.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
+                ?: return toolError("unknown tab: $raw")
+        }
+        val bitmap = UiBridge.screenshot(tab) ?: return toolError("AndVibe is not on screen. Open it on the device and try again.")
+        val png = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, png)
+        val bytes = png.toByteArray()
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val label = (tab ?: AppState.tab).name.lowercase()
+        val base = nameArg.trim().removeSuffix(".png").filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+            .take(60).ifEmpty { "$label-$stamp" }
+        val dir = AppState.appContext.getExternalFilesDir("screenshots") ?: error("external files dir is unavailable")
+        dir.mkdirs()
+        val file = File(dir, "$base.png")
+        file.writeBytes(bytes)
+        DebugLog.step("mcp", "screenshot ${file.name} ${bitmap.width}x${bitmap.height}")
+        val note = buildString {
+            append("saved ${file.absolutePath}\n")
+            append("size ${bitmap.width}x${bitmap.height}, ${bytes.size} bytes\n")
+            append("adb pull ${file.absolutePath} web/src/assets/screens/${file.name}")
+        }
+        val image = JSONObject()
+            .put("type", "image")
+            .put("mimeType", "image/png")
+            .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
+        return JSONObject()
+            .put("content", JSONArray().put(image).put(JSONObject().put("type", "text").put("text", note)))
+            .put("isError", false)
     }
 
     private fun stateText(): String {
