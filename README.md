@@ -6,12 +6,12 @@ The app has five tabs: Console, Files, Git, Vibe, and Build. Console also opens 
 
 ## Install AndVibe
 
-Open `/Users/b/Projects/Andvibe` in Android Studio, wait for Gradle sync, pick a phone or emulator, and press Run.
+Open the cloned repo folder in Android Studio, wait for Gradle sync, pick a phone or emulator, and press Run. In the commands below, `<repo-path>` is that folder. Run `pwd` inside it to print the full path.
 
 From a terminal, with a device or emulator connected:
 
 ```bash
-cd /Users/b/Projects/Andvibe
+cd <repo-path>
 ./gradlew :app:installDebug
 ```
 
@@ -95,19 +95,19 @@ Gradle, Java, Kotlin, Python, Rust, and Go are not compiled on the phone.
 
 The builder is `builder/`. The image is JDK 21 plus Android SDK platforms 37 and 36, and build-tools 37.0.0 and 36.0.0. Java and the SDK are downloaded once, when the image is built. A later build does not install them again.
 
-List projects and select one. `PROJECT_ID` is the ID column, not the display name.
+List projects and select one. `<project-id>` is the PROJECT_ID column, not the display name.
 
 ```bash
 gcloud config get-value account
 gcloud projects list
 gcloud config get-value project
-gcloud config set project PROJECT_ID
+gcloud config set project <project-id>
 ```
 
 Create a token once and keep it. It is the only check on `POST /build`. A later deploy should reuse the same token, or the phone's saved token will stop working.
 
 ```bash
-cd /Users/b/Projects/Andvibe
+cd <repo-path>
 
 export BUILD_TOKEN="$(openssl rand -hex 32)"
 echo "$BUILD_TOKEN"
@@ -133,7 +133,7 @@ The first deploy is slow because the image downloads the SDK. Source deploy also
 Run this from the repo after a change under `builder/`. Leave off `--set-env-vars` so the `BUILD_TOKEN` already on the service stays. Do not generate a new token.
 
 ```bash
-cd /Users/b/Projects/Andvibe
+cd <repo-path>
 
 gcloud run deploy andvibe-build \
   --source builder \
@@ -156,30 +156,30 @@ Install the matching app build too. This service streams events and then the APK
 
 The model API key stays on the phone. Do not put it in Secret Manager or in the Cloud Run environment. `BUILD_TOKEN` is only the bearer token that guards `/build`.
 
-Check that the service is up:
+Check that the service is up. `<service-url>` is printed at the end of the deploy, or print it with `gcloud run services describe andvibe-build --region us-central1 --format 'value(status.url)'`.
 
 ```bash
-curl -fL "https://SERVICE_URL/healthz"
+curl -fL "<service-url>/healthz"
 ```
 
 `/healthz` is open. `/build` rejects a missing or wrong bearer token. The service allows unauthenticated HTTP so the phone can call it. The token is what keeps builds private.
 
-Container stdout goes to Cloud Logging. `gcloud run services logs tail` is not in the stable command on this SDK, so the live tail is the beta command. `PROJECT_ID` here is the project id (`marmot-marketing`), not the project number in the service URL.
+Container stdout goes to Cloud Logging. `gcloud run services logs tail` is not in the stable command on this SDK, so the live tail is the beta command. `<project-id>` is the project ID, not the project number in the service URL. Print it with `gcloud config get-value project`, or read the PROJECT_ID column of `gcloud projects list`.
 
 ```bash
-gcloud beta run services logs tail andvibe-build --region us-central1 --project marmot-marketing
+gcloud beta run services logs tail andvibe-build --region us-central1 --project <project-id>
 ```
 
 A one-shot read is in the stable command:
 
 ```bash
-gcloud run services logs read andvibe-build --region us-central1 --project marmot-marketing --limit 80
+gcloud run services logs read andvibe-build --region us-central1 --project <project-id> --limit 80
 ```
 
-Source deploy prints a Cloud Build log URL. `gcloud builds log` rejects a project number. Pass the project id and the build id from that URL:
+Source deploy prints a Cloud Build log URL. `gcloud builds log` rejects a project number. Pass the project ID and the build ID. `<build-id>` is the UUID at the end of that URL. If you lost the URL, list recent builds with `gcloud builds list --region us-central1 --project <project-id> --limit 5` and copy the ID column.
 
 ```bash
-gcloud builds log 357a5ca6-b64c-4b3d-b35a-930044e222d6 --region us-central1 --project marmot-marketing
+gcloud builds log <build-id> --region us-central1 --project <project-id>
 ```
 
 Optional environment variables, comma-separated in `--set-env-vars`:
@@ -218,11 +218,11 @@ Stay on Cloud Run for this phone contract. Lambda caps a request at 15 minutes a
 Rebuild and install AndVibe after a client change:
 
 ```bash
-cd /Users/b/Projects/Andvibe
+cd <repo-path>
 ./gradlew :app:installDebug
 ```
 
-Open a project that contains `gradlew`. On the Build tab, paste the service URL (`https://….run.app`, no path) and the build token, then press **Build APK**.
+Open a project that contains `gradlew`. On the Build tab, paste `<service-url>` (`https://….run.app`, no path) and the build token, then press **Build APK**.
 
 The phone zips the project and posts it to `/build?task=assembleDebug`. Gradle lines stream to the Console and the Build log as they happen. The zip does not contain the model API key.
 
