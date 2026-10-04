@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackground"
+    android:gravity="center_vertical"
+    android:minHeight="30dp"
+    android:orientation="horizontal"
+    android:paddingStart="22dp"
+    android:paddingEnd="4dp">
+
+    <ImageView
+        android:id="@+id/commitDot"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:importantForAccessibility="no"
+        android:src="@drawable/ic_git_commit"
+        android:tint="@color/accent" />
+
+    <TextView
+        android:id="@+id/commitSubject"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:singleLine="true"
+        android:textColor="@color/ink"
+        android:textSize="13sp" />
+
+    <TextView
+        android:id="@+id/commitMeta"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:fontFamily="monospace"
+        android:singleLine="true"
+        android:textColor="@color/muted"
+        android:textSize="11sp" />
+</LinearLayout>

@@ -4,39 +4,100 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:paddingStart="8dp"
+    android:paddingTop="4dp"
+    android:paddingEnd="8dp"
+    android:paddingBottom="8dp">
 
-    <TextView
-        android:id="@+id/gitBranch"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Git"
-        android:textColor="@color/ink"
-        android:textSize="16sp" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:letterSpacing="0.08"
+            android:text="SOURCE CONTROL"
+            android:textColor="@color/muted"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <ImageButton
+            android:id="@+id/gitRefresh"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Refresh"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_git_refresh"
+            android:tint="@color/ink" />
+
+        <ImageButton
+            android:id="@+id/gitPull"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Pull"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_git_pull"
+            android:tint="@color/ink" />
+
+        <ImageButton
+            android:id="@+id/gitPush"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Push"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_git_push"
+            android:tint="@color/ink" />
+
+        <ImageButton
+            android:id="@+id/gitMore"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="More actions"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_git_more"
+            android:tint="@color/ink" />
+    </LinearLayout>
 
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/gitTabs"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
+        android:layout_height="36dp"
         android:background="@color/bg"
+        app:tabGravity="start"
         app:tabIndicatorColor="@color/accent"
         app:tabIndicatorFullWidth="false"
+        app:tabMode="scrollable"
+        app:tabPaddingEnd="12dp"
+        app:tabPaddingStart="12dp"
         app:tabRippleColor="@android:color/transparent"
-        app:tabSelectedTextColor="@color/accent"
+        app:tabSelectedTextColor="@color/ink"
         app:tabTextAppearance="@style/TextAppearance.AndVibe.Tab"
         app:tabTextColor="@color/muted">
 
         <com.google.android.material.tabs.TabItem
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Status" />
+            android:text="Changes" />
 
         <com.google.android.material.tabs.TabItem
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Releases" />
     </com.google.android.material.tabs.TabLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/line" />
 
     <FrameLayout
         android:layout_width="match_parent"
@@ -49,120 +110,121 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-    <HorizontalScrollView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:scrollbars="none">
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-        <LinearLayout
+        <TextView
+            android:id="@+id/gitBranch"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:background="@drawable/bg_chip"
+            android:drawableStart="@drawable/ic_git_branch"
+            android:drawablePadding="6dp"
+            android:drawableTint="@color/ink"
+            android:ellipsize="end"
+            android:gravity="center_vertical"
+            android:maxWidth="220dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="12dp"
+            android:singleLine="true"
+            android:text="Git"
+            android:textColor="@color/ink"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/gitSync"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/gitRefresh"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
-                android:minHeight="40dp"
-                android:text="Refresh"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/gitStageAll"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
-                android:minHeight="40dp"
-                android:text="Stage all"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/gitUnstageAll"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
-                android:minHeight="40dp"
-                android:text="Unstage"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/gitPull"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
-                android:minHeight="40dp"
-                android:text="Pull"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/gitPush"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
-                android:minHeight="40dp"
-                android:text="Push"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/gitFetch"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
-                android:minHeight="40dp"
-                android:text="Fetch"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/gitBranches"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
-                android:minHeight="40dp"
-                android:text="Branch"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/gitLog"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
-                android:minHeight="40dp"
-                android:text="Log"
-                android:textSize="13sp" />
-
-            <Button
-                android:id="@+id/gitInit"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minHeight="40dp"
-                android:text="Init"
-                android:textSize="13sp" />
-        </LinearLayout>
-    </HorizontalScrollView>
+            android:layout_marginStart="8dp"
+            android:fontFamily="monospace"
+            android:textColor="@color/muted"
+            android:textSize="12sp" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/gitSummary"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginStart="2dp"
+        android:layout_marginTop="4dp"
+        android:ellipsize="middle"
+        android:singleLine="true"
         android:textColor="@color/muted"
-        android:textSize="12sp" />
+        android:textSize="11sp" />
+
+    <LinearLayout
+        android:id="@+id/gitComposer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical">
+
+        <EditText
+            android:id="@+id/gitMessage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_field"
+            android:gravity="top|start"
+            android:hint="Message"
+            android:importantForAutofill="no"
+            android:inputType="textMultiLine|textCapSentences"
+            android:maxLines="4"
+            android:minLines="1"
+            android:paddingStart="10dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="8dp"
+            android:textColor="@color/ink"
+            android:textColorHint="@color/muted"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/gitCommit"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:minHeight="36dp"
+                android:text="Commit"
+                android:textSize="13sp"
+                app:backgroundTint="@color/git_commit"
+                app:cornerRadius="4dp"
+                app:icon="@drawable/ic_git_check"
+                app:iconGravity="textStart"
+                app:iconPadding="6dp"
+                app:rippleColor="@color/accent" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/gitSuggest"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="40dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="6dp"
+                android:contentDescription="Write a commit message with AI"
+                android:minWidth="0dp"
+                android:minHeight="36dp"
+                android:padding="0dp"
+                app:cornerRadius="4dp"
+                app:icon="@drawable/ic_git_sparkle"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconTint="@color/ink" />
+        </LinearLayout>
+    </LinearLayout>
 
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="6dp"
         android:layout_weight="1">
 
         <ScrollView
@@ -175,7 +237,8 @@
                 android:id="@+id/gitLists"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical" />
+                android:orientation="vertical"
+                android:paddingBottom="8dp" />
         </ScrollView>
 
         <TextView
@@ -192,6 +255,7 @@
             android:id="@+id/gitDetailScroll"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:background="@color/tape"
             android:fillViewport="true"
             android:visibility="gone">
 
@@ -200,6 +264,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:fontFamily="monospace"
+                android:padding="8dp"
                 android:textColor="@color/ink"
                 android:textIsSelectable="true"
                 android:textSize="12sp" />
@@ -214,52 +279,6 @@
         android:layout_marginTop="8dp"
         android:text="Back to changes"
         android:visibility="gone" />
-
-    <LinearLayout
-        android:id="@+id/gitComposer"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:orientation="vertical">
-
-        <EditText
-            android:id="@+id/gitMessage"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_field"
-            android:gravity="top|start"
-            android:hint="Commit message"
-            android:importantForAutofill="no"
-            android:inputType="textMultiLine|textCapSentences"
-            android:maxLines="4"
-            android:minLines="2"
-            android:padding="10dp"
-            android:textColor="@color/ink"
-            android:textColorHint="@color/muted"
-            android:textSize="14sp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/gitCommit"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Commit" />
-
-            <Button
-                android:id="@+id/gitSuggest"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="Message" />
-        </LinearLayout>
-    </LinearLayout>
     </LinearLayout>
 
         <ScrollView

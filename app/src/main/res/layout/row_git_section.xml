@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="4dp"
+    android:background="?attr/selectableItemBackground"
+    android:gravity="center_vertical"
+    android:minHeight="30dp"
+    android:orientation="horizontal"
+    android:paddingEnd="4dp">
+
+    <ImageView
+        android:id="@+id/sectionChevron"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:importantForAccessibility="no"
+        android:src="@drawable/ic_git_chevron"
+        android:tint="@color/ink" />
+
+    <TextView
+        android:id="@+id/sectionTitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:layout_weight="1"
+        android:letterSpacing="0.06"
+        android:singleLine="true"
+        android:textColor="@color/ink"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
+    <ImageButton
+        android:id="@+id/sectionAction"
+        android:layout_width="30dp"
+        android:layout_height="30dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_git_plus"
+        android:tint="@color/muted"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/sectionCount"
+        android:layout_width="wrap_content"
+        android:layout_height="18dp"
+        android:layout_marginStart="4dp"
+        android:background="@drawable/bg_badge"
+        android:gravity="center"
+        android:minWidth="18dp"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:textColor="@color/ink"
+        android:textSize="11sp" />
+</LinearLayout>

@@ -42,7 +42,11 @@ object GitOps {
         val summary: String,
         val changes: List<Change>,
         val isRepo: Boolean,
-        val commits: List<CommitLine> = emptyList()
+        val commits: List<CommitLine> = emptyList(),
+        val ahead: Int = 0,
+        val behind: Int = 0,
+        val upstream: Boolean = false,
+        val remote: String = ""
     )
 
     fun snapshot(start: File, repos: File): Snapshot {
@@ -570,7 +574,17 @@ object GitOps {
                 )
             }
         }
-        return Snapshot(branch, summary, shown, true, commits)
+        return Snapshot(
+            branch,
+            summary,
+            shown,
+            true,
+            commits,
+            ahead = tracking?.getAheadCount() ?: 0,
+            behind = tracking?.getBehindCount() ?: 0,
+            upstream = tracking != null,
+            remote = remote.orEmpty()
+        )
     }
 
     fun originUrl(start: File, repos: File): String {

@@ -14,6 +14,11 @@
     <color name="quote">#FFD29922</color>
     <color name="meter_red">#FFF85149</color>
     <color name="meter_green">#FF3FB950</color>
+    <color name="git_modified">#FFE2C08D</color>
+    <color name="git_added">#FF73C991</color>
+    <color name="git_deleted">#FFC74E39</color>
+    <color name="git_conflict">#FFE4676B</color>
+    <color name="git_commit">#FF1F6FEB</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 </resources>

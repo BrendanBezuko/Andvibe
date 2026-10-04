@@ -29,7 +29,9 @@ import com.example.andvibe.databinding.RowApkBinding
 import com.example.andvibe.databinding.RowCardBinding
 import com.example.andvibe.databinding.RowFossBinding
 import com.example.andvibe.databinding.RowNewsBinding
+import com.example.andvibe.databinding.RowGitCommitBinding
 import com.example.andvibe.databinding.RowGitFileBinding
+import com.example.andvibe.databinding.RowGitSectionBinding
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.tabs.TabLayout
 import java.io.File
@@ -45,6 +47,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private var savedText = ""
     private var editing = false
     private var displayed = emptyList<File>()
+    private val gitCollapsed = mutableSetOf<String>()
     private val vault = mutableMapOf<String, EditText>()
     private val apiKeys = linkedMapOf<Provider, EditText>()
     private var settingsOpen = false
@@ -289,15 +292,27 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val snap = AppState.gitSnapshot
         val showDetail = AppState.gitDetail != null
         page.gitBranch.text = when {
-            AppState.gitBusy -> "Working…"
-            snap == null || snap.branch.isBlank() -> "Git"
+            snap == null || snap.branch.isBlank() -> "No repository"
             else -> snap.branch
+        }
+        page.gitSync.text = when {
+            snap?.isRepo != true -> ""
+            !snap.upstream -> "no upstream"
+            else -> "↓${snap.behind} ↑${snap.ahead}"
         }
         page.gitSummary.text = when {
             AppState.gitBusy -> "Working…"
             snap == null -> "Open a project, then refresh."
-            else -> snap.summary
+            !snap.isRepo -> snap.summary
+            else -> snap.remote.ifBlank { "No remote" }
         }
+        val staged = snap?.changes?.count { it.staged } ?: 0
+        page.gitMessage.hint = if (snap?.isRepo == true && snap.branch.isNotBlank()) {
+            "Message (commit on ${snap.branch})"
+        } else {
+            "Message"
+        }
+        page.gitCommit.text = if (staged > 0) "Commit $staged" else "Commit"
         if (AppState.gitMessageClear) {
             page.gitMessage.setText("")
             AppState.gitMessageClear = false
@@ -310,7 +325,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         page.gitScroll.visibility = if (showLists) View.VISIBLE else View.GONE
         page.gitEmpty.text = when {
             snap == null -> "Open a project from Files."
-            !snap.isRepo -> snap.summary
+            !snap.isRepo -> "${snap.summary}\n\nUse ⋯ › Initialize repository to start tracking."
             else -> "No changes"
         }
         page.gitEmpty.visibility = if (!showDetail && !showLists) View.VISIBLE else View.GONE
@@ -320,15 +335,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             page.gitScroll.post { page.gitScroll.scrollTo(0, y) }
         }
         val enabled = !AppState.gitBusy
-        page.gitRefresh.isEnabled = enabled
-        page.gitStageAll.isEnabled = enabled
-        page.gitUnstageAll.isEnabled = enabled
-        page.gitPull.isEnabled = enabled
-        page.gitPush.isEnabled = enabled
-        page.gitFetch.isEnabled = enabled
-        page.gitBranches.isEnabled = enabled
-        page.gitLog.isEnabled = enabled
-        page.gitInit.isEnabled = enabled
+        for (button in listOf(page.gitRefresh, page.gitPull, page.gitPush, page.gitMore)) {
+            button.isEnabled = enabled
+            button.alpha = if (enabled) 1f else 0.4f
+        }
+        page.gitBranch.isEnabled = enabled
         page.gitCommit.isEnabled = enabled
         page.gitSuggest.isEnabled = enabled && snap?.isRepo == true && snap.changes.isNotEmpty()
         syncBack()
@@ -1296,18 +1307,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             AppState.gitDetail = null
             refreshGit()
         }
-        page.gitStageAll.setOnClickListener {
-            runGit {
-                AppState.gitDetail = null
-                GitOps.stageAll(AppState.cwd, AppState.reposDir)
-            }
-        }
-        page.gitUnstageAll.setOnClickListener {
-            runGit {
-                AppState.gitDetail = null
-                GitOps.unstageAll(AppState.cwd, AppState.reposDir)
-            }
-        }
         page.gitPull.setOnClickListener {
             runGit {
                 AppState.gitDetail = null
@@ -1320,28 +1319,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 GitOps.push(AppState.cwd, AppState.reposDir)
             }
         }
-        page.gitFetch.setOnClickListener {
-            runGit {
-                AppState.gitDetail = null
-                GitOps.fetch(AppState.cwd, AppState.reposDir)
-            }
-        }
-        page.gitBranches.setOnClickListener { showBranches() }
-        page.gitLog.setOnClickListener {
-            runGit {
-                AppState.gitDetail = GitOps.history(AppState.cwd, AppState.reposDir)
-                null
-            }
-        }
-        page.gitInit.setOnClickListener {
-            runGit {
-                AppState.gitDetail = null
-                val dir = runCatching { AppState.projectRoot() }.getOrElse {
-                    return@runGit it.message ?: "Open a project first."
-                }
-                GitOps.init(dir)
-            }
-        }
+        page.gitBranch.setOnClickListener { showBranches() }
+        page.gitMore.setOnClickListener { showGitMenu(it) }
         page.gitCommit.setOnClickListener { commitGit() }
         page.gitSuggest.setOnClickListener { suggestCommitMessage() }
         page.gitDetailClose.setOnClickListener { closeGitDetail() }
@@ -2108,43 +2087,104 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun fillGitLists(parent: LinearLayout, snap: GitOps.Snapshot) {
         parent.removeAllViews()
-        gitHeading(parent, "Changes")
-        val unstaged = snap.changes.filter { it.unstaged }
-        if (unstaged.isEmpty()) gitNote(parent, "No unstaged changes")
-        else unstaged.forEach { gitFileRow(parent, it, stage = true) }
-        gitHeading(parent, "Staged")
         val staged = snap.changes.filter { it.staged }
-        if (staged.isEmpty()) gitNote(parent, "Nothing staged")
-        else staged.forEach { gitFileRow(parent, it, stage = false) }
-        gitHeading(parent, "Commits")
-        if (snap.commits.isEmpty()) gitNote(parent, "No commits yet")
-        else snap.commits.forEach { gitCommitRow(parent, it) }
+        val unstaged = snap.changes.filter { it.unstaged }
+        if (staged.isNotEmpty()) {
+            val open = gitSection(parent, "Staged Changes", staged.size, R.drawable.ic_git_minus, "Unstage all") {
+                GitOps.unstageAll(AppState.cwd, AppState.reposDir)
+            }
+            if (open) staged.forEach { gitFileRow(parent, it, stage = false) }
+        }
+        if (unstaged.isNotEmpty()) {
+            val open = gitSection(parent, "Changes", unstaged.size, R.drawable.ic_git_plus, "Stage all") {
+                GitOps.stageAll(AppState.cwd, AppState.reposDir)
+            }
+            if (open) unstaged.forEach { gitFileRow(parent, it, stage = true) }
+        }
+        if (snap.changes.isEmpty()) gitNote(parent, "No changes")
+        if (gitSection(parent, "Commits", snap.commits.size, 0, "", null)) {
+            if (snap.commits.isEmpty()) gitNote(parent, "No commits yet")
+            else snap.commits.forEach { gitCommitRow(parent, it) }
+        }
     }
 
-    private fun gitHeading(parent: LinearLayout, title: String) {
-        val view = TextView(this)
-        view.text = title
-        view.setTextColor(ContextCompat.getColor(this, R.color.ink))
-        view.textSize = 14f
-        val top = if (parent.childCount == 0) 0 else (14 * resources.displayMetrics.density).toInt()
-        view.setPadding(0, top, 0, (4 * resources.displayMetrics.density).toInt())
-        parent.addView(view)
+    private fun gitSection(
+        parent: LinearLayout,
+        title: String,
+        count: Int,
+        actionIcon: Int,
+        actionLabel: String,
+        action: (() -> String?)?
+    ): Boolean {
+        val row = RowGitSectionBinding.inflate(layoutInflater, parent, false)
+        val open = title !in gitCollapsed
+        row.sectionTitle.text = title.uppercase()
+        row.sectionChevron.rotation = if (open) 90f else 0f
+        row.sectionCount.text = count.toString()
+        row.root.setOnClickListener {
+            if (!gitCollapsed.remove(title)) gitCollapsed.add(title)
+            onGit()
+        }
+        if (action != null) {
+            row.sectionAction.visibility = View.VISIBLE
+            row.sectionAction.setImageResource(actionIcon)
+            row.sectionAction.contentDescription = actionLabel
+            row.sectionAction.setOnClickListener {
+                runGit {
+                    AppState.gitDetail = null
+                    action()
+                }
+            }
+        }
+        parent.addView(row.root)
+        return open
     }
 
     private fun gitNote(parent: LinearLayout, text: String) {
         val view = TextView(this)
         view.text = text
         view.setTextColor(ContextCompat.getColor(this, R.color.muted))
-        view.textSize = 13f
-        view.setPadding(0, (4 * resources.displayMetrics.density).toInt(), 0, 0)
+        view.textSize = 12f
+        view.setPadding(dp(22), dp(6), 0, dp(6))
         parent.addView(view)
     }
 
     private fun gitFileRow(parent: LinearLayout, change: GitOps.Change, stage: Boolean) {
         val row = RowGitFileBinding.inflate(layoutInflater, parent, false)
-        row.gitPath.text = change.label
-        row.gitMark.text = if (stage) "+" else "−"
-        row.gitPath.setOnClickListener { showChangeMenu(change) }
+        val code = if (stage) change.code.getOrElse(1) { ' ' } else change.code.getOrElse(0) { ' ' }
+        val (letter, color) = when (code) {
+            'M' -> "M" to R.color.git_modified
+            'A' -> "A" to R.color.git_added
+            '?' -> "U" to R.color.git_added
+            'D' -> "D" to R.color.git_deleted
+            'U' -> "!" to R.color.git_conflict
+            else -> code.toString().trim() to R.color.muted
+        }
+        val tint = getColor(color)
+        val name = change.path.substringAfterLast('/')
+        val dir = change.path.substringBeforeLast('/', "")
+        val label = android.text.SpannableStringBuilder(name)
+        if (code == 'D') {
+            label.setSpan(android.text.style.StrikethroughSpan(), 0, name.length, 0)
+        }
+        if (dir.isNotEmpty()) {
+            val start = label.length
+            label.append("  ").append(dir)
+            label.setSpan(
+                android.text.style.ForegroundColorSpan(getColor(R.color.muted)), start, label.length, 0
+            )
+            label.setSpan(android.text.style.RelativeSizeSpan(0.85f), start, label.length, 0)
+        }
+        row.gitPath.text = label
+        row.gitPath.setTextColor(tint)
+        row.gitStatus.text = letter
+        row.gitStatus.setTextColor(tint)
+        row.gitIcon.setImageDrawable(FileIcons.forFile(File(change.path), dp(16)))
+        row.gitMark.setImageResource(if (stage) R.drawable.ic_git_plus else R.drawable.ic_git_minus)
+        row.gitMark.contentDescription = if (stage) "Stage" else "Unstage"
+        row.gitDiscard.visibility = if (stage) View.VISIBLE else View.GONE
+        row.gitDiscard.setOnClickListener { confirmDiscard(change) }
+        row.root.setOnClickListener { showChangeMenu(change) }
         row.gitMark.setOnClickListener {
             runGit {
                 AppState.gitDetail = null
@@ -2156,18 +2196,45 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun gitCommitRow(parent: LinearLayout, commit: GitOps.CommitLine) {
-        val view = TextView(this)
-        view.text = "${commit.id}  ${commit.whenText}  ${commit.subject}"
-        view.setTextColor(ContextCompat.getColor(this, R.color.ink))
-        view.textSize = 13f
-        view.typeface = android.graphics.Typeface.MONOSPACE
-        val pad = (6 * resources.displayMetrics.density).toInt()
-        view.setPadding(0, pad, 0, pad)
-        view.setOnClickListener {
+        val row = RowGitCommitBinding.inflate(layoutInflater, parent, false)
+        row.commitSubject.text = commit.subject
+        row.commitMeta.text = "${commit.id} · ${commit.whenText}"
+        row.root.setOnClickListener {
             AppState.gitDetail = "${commit.id} ${commit.whenText}\n${commit.subject}"
             onGit()
         }
-        parent.addView(view)
+        parent.addView(row.root)
+    }
+
+    private fun showGitMenu(anchor: View) {
+        val menu = android.widget.PopupMenu(this, anchor)
+        val actions = listOf<Pair<String, () -> Unit>>(
+            "Stage all" to { runGit { AppState.gitDetail = null; GitOps.stageAll(AppState.cwd, AppState.reposDir) } },
+            "Unstage all" to { runGit { AppState.gitDetail = null; GitOps.unstageAll(AppState.cwd, AppState.reposDir) } },
+            "Fetch" to { runGit { AppState.gitDetail = null; GitOps.fetch(AppState.cwd, AppState.reposDir) } },
+            "Checkout branch…" to { showBranches() },
+            "Full log" to {
+                runGit {
+                    AppState.gitDetail = GitOps.history(AppState.cwd, AppState.reposDir)
+                    null
+                }
+            },
+            "Initialize repository" to {
+                runGit {
+                    AppState.gitDetail = null
+                    val dir = runCatching { AppState.projectRoot() }.getOrElse {
+                        return@runGit it.message ?: "Open a project first."
+                    }
+                    GitOps.init(dir)
+                }
+            }
+        )
+        actions.forEachIndexed { i, (label, _) -> menu.menu.add(0, i, i, label) }
+        menu.setOnMenuItemClickListener { item ->
+            actions.getOrNull(item.itemId)?.second?.invoke()
+            true
+        }
+        menu.show()
     }
 
     private fun suggestCommitMessage() {
