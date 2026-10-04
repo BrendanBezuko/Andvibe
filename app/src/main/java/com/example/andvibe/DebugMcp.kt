@@ -1,5 +1,6 @@
 package com.example.andvibe
 
+import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -11,10 +12,20 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 object DebugMcp {
     const val PORT = 8765
+    private const val PREF = "andvibe_mcp"
     private val started = AtomicBoolean(false)
+    private val generation = AtomicInteger(0)
+    private val lock = Any()
+
+    @Volatile
+    private var enabled = true
+
+    @Volatile
+    private var server: ServerSocket? = null
 
     @Volatile
     private var listening = false
@@ -26,6 +37,7 @@ object DebugMcp {
     private var lastRequestAt = 0L
 
     fun statusText(): String {
+        if (!enabled) return "Off"
         val fail = failure
         val inUse = fail?.contains("EADDRINUSE") == true || fail?.contains("Address already in use") == true
         val head = when {
@@ -50,27 +62,72 @@ object DebugMcp {
         return "$head\n$whenLine\n$command"
     }
 
+    fun init(context: Context) {
+        enabled = context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean("enabled", true)
+        if (enabled) start() else publish()
+    }
+
+    fun isEnabled(): Boolean = enabled
+
+    fun setEnabled(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putBoolean("enabled", on).apply()
+        enabled = on
+        if (on) start() else stop()
+    }
+
     fun start() {
+        if (!enabled) return
         if (!started.compareAndSet(false, true)) return
-        Thread({
-            try {
-                val server = ServerSocket(PORT, 20, InetAddress.getByName("127.0.0.1"))
+        val gen = generation.get()
+        Thread({ serve(gen) }, "andvibe-mcp").apply { isDaemon = true }.start()
+    }
+
+    fun stop() {
+        val old = synchronized(lock) {
+            generation.incrementAndGet()
+            started.set(false)
+            listening = false
+            failure = null
+            server.also { server = null }
+        }
+        try {
+            old?.close()
+        } catch (_: Exception) {
+        }
+        DebugLog.step("mcp", "stopped")
+        publish()
+    }
+
+    private fun serve(gen: Int) {
+        try {
+            val socket = ServerSocket(PORT, 20, InetAddress.getByName("127.0.0.1"))
+            synchronized(lock) {
+                if (generation.get() != gen) {
+                    socket.close()
+                    return
+                }
+                server = socket
                 listening = true
                 failure = null
-                DebugLog.step("mcp", "listening on 127.0.0.1:$PORT")
-                publish()
-                while (true) {
-                    val socket = server.accept()
-                    Thread({ handle(socket) }, "andvibe-mcp-conn").apply { isDaemon = true }.start()
-                }
-            } catch (t: Throwable) {
+            }
+            DebugLog.step("mcp", "listening on 127.0.0.1:$PORT")
+            publish()
+            while (true) {
+                val conn = socket.accept()
+                Thread({ handle(conn) }, "andvibe-mcp-conn").apply { isDaemon = true }.start()
+            }
+        } catch (t: Throwable) {
+            synchronized(lock) {
+                // stop() closed the socket on purpose; it already reset the state.
+                if (generation.get() != gen) return
+                server = null
                 listening = false
                 failure = t.message ?: t.javaClass.simpleName
                 started.set(false)
-                DebugLog.step("mcp", "listen failed: ${failure}")
-                publish()
             }
-        }, "andvibe-mcp").apply { isDaemon = true }.start()
+            DebugLog.step("mcp", "listen failed: ${failure}")
+            publish()
+        }
     }
 
     private fun publish() {

@@ -86,7 +86,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Checked repos belong to this workspace. The board is shared by those repos."
+            android:text="Check the downloaded repos this workspace uses. Files, Git, Vibe, and Build only see checked repos. The board is shared by them."
             android:textColor="@color/muted"
             android:textSize="13sp" />
 
@@ -95,7 +95,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Clone a repo in Console, then check it here."
+            android:text="No downloaded repos yet. Clone one from Search or Console."
             android:textColor="@color/muted"
             android:textSize="13sp" />
 

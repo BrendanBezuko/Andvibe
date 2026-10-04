@@ -240,7 +240,7 @@ The app keeps a step log for console, build, Cloud Run, git, vibe, import, and l
 adb logcat -s AndVibe
 ```
 
-The app serves that log as an MCP server on the device at `127.0.0.1:8765`. It starts when AndVibe starts. This repo's `.cursor/mcp.json` points Cursor at `http://127.0.0.1:8765/mcp`.
+The app serves that log as an MCP server on the device at `127.0.0.1:8765`. It starts when AndVibe starts, unless **Run MCP server** is unchecked in Console → Settings. That switch is saved and takes effect right away. This repo's `.cursor/mcp.json` points Cursor at `http://127.0.0.1:8765/mcp`.
 
 Cursor is the client on the computer, so the port has to be forwarded from the computer to the device. `adb reverse` listens on the device and blocks the app from binding 8765.
 

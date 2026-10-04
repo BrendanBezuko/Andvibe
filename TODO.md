@@ -1,6 +1,4 @@
 ## bugs
-- console always opens to where last project was but when switching a workspace it should also go back to the root
-- the root should only show relevant files
 - builds happen in the background
 
 ## Must Have

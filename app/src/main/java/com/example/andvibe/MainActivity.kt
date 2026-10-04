@@ -15,6 +15,7 @@ import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -54,7 +55,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private val vault = mutableMapOf<String, EditText>()
     private val apiKeys = linkedMapOf<Provider, EditText>()
     private var settingsOpen = false
-    private var boardOpen = false
     private var workspaceOpen = false
 
     private val openFolder = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -89,10 +89,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         override fun handleOnBackPressed() {
             if (settingsOpen) {
                 closeSettings()
-                return
-            }
-            if (boardOpen) {
-                closeBoard()
                 return
             }
             if (workspaceOpen) {
@@ -132,7 +128,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         setupBuild()
         setupNav()
         setupUsage()
-        noteRepo()
         val open = AppState.openFile
         if (open != null && open.isFile) openEditor(open) else refreshFileList()
         onLog()
@@ -265,6 +260,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             if (binding.vibePage.historyPane.visibility == View.VISIBLE) renderHistory()
         }
         renderChat()
+        renderVibeRepo()
         val send = binding.vibePage.vibeSend
         when {
             !AppState.vibeBusy -> {
@@ -290,20 +286,33 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     override fun onBuild() {
         renderSavedApks()
+        renderBuildHistory()
+        binding.buildPage.buildScope.text = "WORKSPACE · ${WorkspaceStore.current().name.uppercase(Locale.US)}"
         val scroll = binding.buildPage.buildScroll
         val child = scroll.getChildAt(0)
         val nearBottom = child == null || child.bottom <= scroll.height + scroll.scrollY + 160
         val text = AppState.buildText()
         binding.buildPage.buildLog.text = text
+        val page = binding.buildPage
         val root = runCatching { AppState.projectRoot() }.getOrNull()
-        binding.buildPage.projectLine.text = if (root == null) {
+        page.projectLine.text = if (root == null) {
             "No repo yet. Clone one from Search."
         } else {
-            "${RepoFiles.display(root, AppState.reposDir)} — ${JsRunner.detect(root)}"
+            RepoFiles.display(root, AppState.reposDir)
         }
-        binding.buildPage.apkPath.text = AppState.lastApk ?: "No APK yet"
+        page.projectKind.text = root?.let { JsRunner.detect(it) }.orEmpty()
+        page.projectKind.visibility = if (root == null) View.GONE else View.VISIBLE
+        page.apkPath.text = AppState.lastApk?.let { File(it).name } ?: "No APK yet"
         val busy = AppState.buildBusy || AppState.reviseBusy
         val apkReady = AppState.lastApk?.let { File(it).isFile } == true
+        val (status, statusColor) = when {
+            AppState.buildBusy -> "● BUILDING" to R.color.quote
+            AppState.reviseBusy -> "● REVISING" to R.color.quote
+            apkReady -> "● APK READY" to R.color.bid
+            else -> "● NOT BUILT" to R.color.muted
+        }
+        page.buildStatus.text = status
+        page.buildStatus.setTextColor(getColor(statusColor))
         binding.buildPage.installApk.isEnabled = apkReady && !busy
         binding.buildPage.buildApk.isEnabled = !busy
         binding.buildPage.buildApk.text = if (AppState.buildBusy) "Building…" else "Build APK"
@@ -372,7 +381,15 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     override fun onMcp() {
         if (!::binding.isInitialized) return
-        binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+        renderMcp()
+    }
+
+    private fun renderMcp() {
+        val page = binding.settingsPage
+        val on = DebugMcp.isEnabled()
+        if (page.mcpEnabled.isChecked != on) page.mcpEnabled.isChecked = on
+        page.mcpStatus.text = DebugMcp.statusText()
+        page.mcpRetry.visibility = if (on) View.VISIBLE else View.GONE
     }
 
     override fun onUsage() {
@@ -381,7 +398,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.openWorkspace.text = ws.name
         binding.usageTokens.text = (ws.inputTokens + ws.outputTokens).toString()
         binding.usagePrice.text = WorkspaceStore.priceText(ws.costMicros)
-        if (boardOpen) binding.boardPage.boardScope.text = ws.name
+        if (AppState.tab == AppState.Tab.BOARD) renderBoard()
         if (ChatStore.sync()) {
             renderChat()
             renderHistory()
@@ -395,18 +412,24 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         savedText = ""
         binding.filesPage.editor.setText("")
         refreshFileList()
-        if (AppState.tab == AppState.Tab.GIT) refreshGit()
+        if (AppState.tab == AppState.Tab.GIT) refreshGit() else onGit()
         if (AppState.tab == AppState.Tab.BUILD) onBuild()
-        noteRepo()
+        renderVibeRepo()
+        paintTape()
+        if (workspaceOpen) renderRepoChecks()
     }
 
     private fun setupSettings() {
         binding.consolePage.openSettings.setOnClickListener { openSettings() }
         binding.settingsPage.mcpRetry.setOnClickListener {
             DebugMcp.start()
-            binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+            renderMcp()
         }
-        binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+        renderMcp()
+        binding.settingsPage.mcpEnabled.setOnCheckedChangeListener { _, checked ->
+            if (checked != DebugMcp.isEnabled()) DebugMcp.setEnabled(this, checked)
+            renderMcp()
+        }
         binding.settingsPage.allowBackground.setOnClickListener { requestBackground() }
         binding.settingsPage.saveGit.setOnClickListener { saveGitSettings() }
         binding.settingsPage.saveApiKeys.setOnClickListener { saveApiKeys(announce = true) }
@@ -425,10 +448,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun openSettings() {
-        if (boardOpen) closeBoard()
         if (workspaceOpen) closeWorkspace()
         settingsOpen = true
-        binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+        renderMcp()
         renderBackground()
         loadGitSettings()
         loadApiKeys()
@@ -495,10 +517,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val name = intent?.getStringExtra(Notify.EXTRA_TAB) ?: return
         intent.removeExtra(Notify.EXTRA_TAB)
         val tab = AppState.Tab.entries.firstOrNull { it.name == name } ?: return
-        if (settingsOpen) closeSettings()
-        if (boardOpen) closeBoard()
-        if (workspaceOpen) closeWorkspace()
-        binding.bottomNav.selectedItemId = navId(tab)
+        showTab(tab)
     }
 
     private fun closeSettings() {
@@ -553,10 +572,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun setupUsage() {
-        binding.openBoard.setOnClickListener {
-            if (boardOpen) closeBoard() else openBoard()
-        }
-        binding.openWorkspace.setOnClickListener {
+        binding.openWorkspaceBox.setOnClickListener {
             if (workspaceOpen) closeWorkspace() else openWorkspace()
         }
         binding.workspacePage.saveWorkspace.setOnClickListener {
@@ -572,31 +588,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         onUsage()
     }
 
-    private fun openBoard() {
-        if (settingsOpen) closeSettings()
-        if (workspaceOpen) closeWorkspace()
-        boardOpen = true
-        renderBoard()
-        binding.boardPage.root.visibility = View.VISIBLE
-        binding.openBoard.setTextColor(getColor(R.color.accent))
-        syncBack()
-    }
-
-    private fun closeBoard() {
-        if (!boardOpen) return
-        boardOpen = false
-        binding.boardPage.root.visibility = View.GONE
-        binding.openBoard.setTextColor(getColor(R.color.ink))
-        syncBack()
-    }
-
     private fun openWorkspace() {
         if (settingsOpen) closeSettings()
-        if (boardOpen) closeBoard()
         workspaceOpen = true
         renderWorkspace()
         binding.workspacePage.root.visibility = View.VISIBLE
-        binding.openWorkspace.setTextColor(getColor(R.color.accent))
+        binding.openWorkspaceBox.setBackgroundColor(getColor(R.color.line))
         syncBack()
     }
 
@@ -605,9 +602,15 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         saveWorkspaceName()
         workspaceOpen = false
         binding.workspacePage.root.visibility = View.GONE
-        binding.openWorkspace.setTextColor(getColor(R.color.ink))
+        binding.openWorkspaceBox.setBackgroundResource(selectableBackground())
         onUsage()
         syncBack()
+    }
+
+    private fun selectableBackground(): Int {
+        val value = android.util.TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, value, true)
+        return value.resourceId
     }
 
     private fun saveWorkspaceName() {
@@ -619,7 +622,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val ws = WorkspaceStore.current()
         binding.workspacePage.workspaceName.setText(ws.name)
         binding.workspacePage.deleteWorkspace.isEnabled = WorkspaceStore.workspaces().size > 1
-        val names = WorkspaceStore.repoNames()
+        renderRepoChecks()
+        renderWorkspaces()
+    }
+
+    private fun renderRepoChecks() {
+        val ws = WorkspaceStore.current()
+        val names = WorkspaceStore.downloaded()
         binding.workspacePage.repoEmpty.visibility = if (names.isEmpty()) View.VISIBLE else View.GONE
         val repos = binding.workspacePage.repoList
         repos.removeAllViews()
@@ -629,11 +638,34 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 isChecked = name in ws.repos
                 setOnCheckedChangeListener { _, checked ->
                     WorkspaceStore.setRepo(name, checked)
+                    if (!AppState.fitWorkspace()) {
+                        refreshFileList()
+                        renderVibeRepo()
+                    }
                 }
             }
             repos.addView(box)
         }
-        renderWorkspaces()
+    }
+
+    private fun canSwitchWorkspace(): Boolean {
+        if (!AppState.workBusy()) return true
+        android.widget.Toast.makeText(
+            this, "Wait for the agent or build to finish before switching workspaces", android.widget.Toast.LENGTH_SHORT
+        ).show()
+        return false
+    }
+
+    private fun switchedWorkspace() {
+        if (editing) closeEditor(save = true)
+        AppState.fitWorkspace(toRoot = true)
+        AppState.loadWorkspaceBuild()
+        shownApks = ""
+        renderWorkspace()
+        onUsage()
+        refreshFileList()
+        renderVibeRepo()
+        onBuild()
     }
 
     private fun renderWorkspaces() {
@@ -645,18 +677,16 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             row.text = ws.name
             row.setTextColor(getColor(if (ws.id == current.id) R.color.accent else R.color.ink))
             row.setOnClickListener {
-                if (ws.id == current.id) return@setOnClickListener
+                if (ws.id == current.id || !canSwitchWorkspace()) return@setOnClickListener
                 saveWorkspaceName()
-                if (WorkspaceStore.select(ws.id)) {
-                    renderWorkspace()
-                    onUsage()
-                }
+                if (WorkspaceStore.select(ws.id)) switchedWorkspace()
             }
             list.addView(row)
         }
     }
 
     private fun promptNewWorkspace() {
+        if (!canSwitchWorkspace()) return
         saveWorkspaceName()
         val input = EditText(this).apply {
             hint = "Name"
@@ -668,8 +698,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             .setView(input)
             .setPositiveButton("Create") { _, _ ->
                 WorkspaceStore.create(input.text.toString())
-                renderWorkspace()
-                onUsage()
+                switchedWorkspace()
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -677,14 +706,17 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun confirmDeleteWorkspace() {
         val ws = WorkspaceStore.current()
-        if (WorkspaceStore.workspaces().size <= 1) return
+        if (WorkspaceStore.workspaces().size <= 1 || !canSwitchWorkspace()) return
         AlertDialog.Builder(this)
             .setTitle(ws.name)
-            .setMessage("Delete this workspace and its board.")
+            .setMessage("Delete this workspace with its board, chats, saved APKs, and build history. The repos stay on the phone.")
             .setPositiveButton("Delete") { _, _ ->
-                if (WorkspaceStore.delete(ws.id)) ChatStore.forget(ws.id)
-                renderWorkspace()
-                onUsage()
+                if (WorkspaceStore.delete(ws.id)) {
+                    ChatStore.forget(ws.id)
+                    ApkLibrary.forget(this, ws.id)
+                    BuildHistory.forget(ws.id)
+                }
+                switchedWorkspace()
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -692,7 +724,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun renderBoard() {
         val ws = WorkspaceStore.current()
-        binding.boardPage.boardScope.text = ws.name
+        binding.boardPage.boardScope.text = "WORKSPACE · ${ws.name.uppercase(Locale.US)}"
         fillColumn(binding.boardPage.ideaCards, binding.boardPage.ideaEmpty, WorkspaceStore.Column.IDEA)
         fillColumn(binding.boardPage.bugCards, binding.boardPage.bugEmpty, WorkspaceStore.Column.BUG)
         fillColumn(binding.boardPage.solutionCards, binding.boardPage.solutionEmpty, WorkspaceStore.Column.SOLUTION)
@@ -790,14 +822,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             }
         }
         dialog.show()
-    }
-
-    private fun noteRepo() {
-        val name = runCatching { AppState.projectRoot().name }.getOrNull() ?: return
-        if (!WorkspaceStore.adopt(name)) return
-        onUsage()
-        if (boardOpen) renderBoard()
-        if (workspaceOpen) renderWorkspace()
     }
 
     private fun setupConsole() {
@@ -1208,11 +1232,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 val name = GitClient.repoNameFromUrl(url)
                 val dest = File(AppState.reposDir, name)
                 if (dest.isDirectory && !dest.list().isNullOrEmpty()) {
+                    WorkspaceStore.include(name)
                     AppState.cwd = dest.canonicalFile
                     ProjectStore.remember(app, AppState.cwd)
                     AppState.log("already in ~/$name")
                 } else {
                     GitClient.clone(url, dest, AppState::log)
+                    WorkspaceStore.include(name)
                     AppState.cwd = dest.canonicalFile
                     ProjectStore.remember(app, AppState.cwd)
                 }
@@ -1282,6 +1308,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.vibePage.autoTest.isChecked = store.autoTest()
         binding.vibePage.autoTest.setOnCheckedChangeListener { _, checked -> store.setAutoTest(checked) }
         binding.vibePage.vibeSend.setOnClickListener { sendVibe() }
+        binding.vibePage.vibeRepoPick.setOnClickListener { pickVibeRepo() }
+        binding.vibePage.vibeRepoBar.setOnClickListener { pickVibeRepo() }
         binding.vibePage.newChat.setOnClickListener {
             if (AppState.vibeBusy) return@setOnClickListener
             ChatStore.startNew()
@@ -1301,6 +1329,41 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             override fun onTabUnselected(tab: TabLayout.Tab) {}
             override fun onTabReselected(tab: TabLayout.Tab) {}
         })
+    }
+
+    private fun vibeRoot(): File? {
+        val open = runCatching { AppState.projectRoot() }.getOrNull()
+        if (open != null && WorkspaceStore.contains(open)) return open
+        return WorkspaceStore.activeRepos().singleOrNull()
+    }
+
+    private fun renderVibeRepo() {
+        val page = binding.vibePage
+        val repo = if (AppState.vibeBusy) AppState.vibeRepo else vibeRoot()
+        page.vibeRepo.text = repo?.name ?: "No repo selected"
+        page.vibeRepo.setTextColor(getColor(if (repo == null) R.color.muted else R.color.accent))
+        page.vibeRepoPick.isEnabled = !AppState.vibeBusy
+        page.vibeRepoBar.isEnabled = !AppState.vibeBusy
+        page.vibePrompt.hint = if (repo == null) "Pick a repo, or ask for a new project" else "Message ${repo.name}"
+    }
+
+    private fun pickVibeRepo() {
+        if (AppState.vibeBusy) return
+        val dirs = WorkspaceStore.activeRepos()
+        if (dirs.isEmpty()) {
+            openWorkspace()
+            return
+        }
+        val current = vibeRoot()?.name
+        AlertDialog.Builder(this)
+            .setTitle("Repo for Vibe")
+            .setSingleChoiceItems(dirs.map { it.name }.toTypedArray(), dirs.indexOfFirst { it.name == current }) { dialog, which ->
+                dialog.dismiss()
+                if (dirs[which].name != current) openProject(dirs[which])
+            }
+            .setNeutralButton("Edit repos") { _, _ -> openWorkspace() }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun showVibeTab(index: Int) {
@@ -1511,6 +1574,69 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.buildPage.buildApk.setOnClickListener { startBuild() }
         binding.buildPage.reviseBuild.setOnClickListener { reviseBuild() }
         binding.buildPage.installApk.setOnClickListener { installBuiltApk() }
+        binding.buildPage.savedHeader.setOnClickListener {
+            savedApksOpen = !savedApksOpen
+            renderSavedApks()
+        }
+        binding.buildPage.historyHeader.setOnClickListener {
+            buildHistoryOpen = !buildHistoryOpen
+            renderBuildHistory()
+        }
+    }
+
+    private var buildHistoryOpen = false
+    private var shownHistory = ""
+
+    private fun renderBuildHistory() {
+        val key = "${WorkspaceStore.current().id}:${BuildHistory.version}:$buildHistoryOpen"
+        if (key == shownHistory) return
+        shownHistory = key
+        val page = binding.buildPage
+        val entries = BuildHistory.list()
+        page.historyCount.text = entries.size.toString()
+        page.historyChevron.rotation = if (buildHistoryOpen) 90f else 0f
+        page.historyScroll.visibility = if (buildHistoryOpen && entries.isNotEmpty()) View.VISIBLE else View.GONE
+        if (!buildHistoryOpen) return
+        val list = page.buildHistory
+        list.removeAllViews()
+        page.historyScroll.layoutParams = page.historyScroll.layoutParams.apply {
+            height = if (entries.size > 3) dp(200) else ViewGroup.LayoutParams.WRAP_CONTENT
+        }
+        val stamp = SimpleDateFormat("MMM d, HH:mm", Locale.US)
+        for (entry in entries) {
+            val row = RowCardBinding.inflate(layoutInflater, list, false)
+            row.cardTitle.text = (if (entry.ok) "● OK   " else "● FAIL ") + entry.repo.ifBlank { "—" }
+            row.cardTitle.setTextColor(getColor(if (entry.ok) R.color.bid else R.color.ask))
+            row.cardBody.text = buildString {
+                append(stamp.format(Date(entry.started)))
+                if (entry.apk.isNotBlank()) append(" · ").append(entry.apk)
+                else if (entry.summary.isNotBlank()) append(" · ").append(entry.summary)
+            }
+            row.root.setOnClickListener { showBuildEntry(entry) }
+            list.addView(row.root)
+        }
+    }
+
+    private fun showBuildEntry(entry: BuildHistory.Entry) {
+        val text = TextView(this).apply {
+            this.text = BuildHistory.log(entry).ifBlank { "(empty log)" }
+            typeface = Typeface.MONOSPACE
+            textSize = 11f
+            setTextColor(getColor(R.color.tape_ink))
+            setTextIsSelectable(true)
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+        val scroll = android.widget.ScrollView(this).apply { addView(text) }
+        val stamp = SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date(entry.started))
+        AlertDialog.Builder(this)
+            .setTitle("${entry.repo.ifBlank { "Build" }} · $stamp")
+            .setView(scroll)
+            .setPositiveButton("Close", null)
+            .setNeutralButton("Delete") { _, _ ->
+                BuildHistory.delete(entry)
+                renderBuildHistory()
+            }
+            .show()
     }
 
     private fun startBuild() {
@@ -1522,13 +1648,16 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.clearBuild()
         val appContext = applicationContext
         val job = startJob("Building APK", AppState.Tab.BUILD)
+        val started = System.currentTimeMillis()
         AppState.io.execute {
             var cloud = false
             var title = "Build failed"
             var summary = ""
             var built: File? = null
+            var repo = ""
             try {
                 val root = AppState.projectRoot()
+                repo = root.name
                 cloud = File(root, "gradlew").isFile
                 DebugLog.step("build", "start path=${root.absolutePath} gradlew=$cloud")
                 AppState.buildLog(RepoFiles.display(root, AppState.reposDir))
@@ -1580,6 +1709,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 if (cloud) AppState.log(message)
                 summary = t.message ?: t.javaClass.simpleName
             } finally {
+                BuildHistory.record(repo, started, built != null, built?.name, summary, AppState.buildText())
                 AppState.buildBusy = false
                 UiBridge.buildUpdate()
                 Jobs.end(job, title, summary, built)
@@ -1661,19 +1791,34 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private var shownApks = ""
+    private var savedApksOpen = false
 
     private fun renderSavedApks() {
         val files = ApkLibrary.list(this)
         if (AppState.lastApk?.let { File(it).isFile } != true) {
             AppState.lastApk = files.firstOrNull()?.absolutePath
         }
+        val page = binding.buildPage
+        page.savedCount.text = files.size.toString()
+        page.savedChevron.rotation = if (savedApksOpen) 90f else 0f
+        page.savedScroll.visibility = if (savedApksOpen && files.isNotEmpty()) View.VISIBLE else View.GONE
         val key = files.joinToString { "${it.absolutePath}:${it.length()}" }
-        val list = binding.buildPage.savedApks
-        if (key == shownApks && list.childCount == files.size) return
+        val list = page.savedApks
+        val expectedChildren = if (files.isEmpty()) 0 else files.size * 2 - 1
+        if (key == shownApks && list.childCount == expectedChildren) return
         shownApks = key
         list.removeAllViews()
+        val density = resources.displayMetrics.density
+        page.savedScroll.layoutParams = page.savedScroll.layoutParams.apply {
+            height = if (files.size > 3) (180 * density).toInt() else ViewGroup.LayoutParams.WRAP_CONTENT
+        }
         val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
-        for (file in files) {
+        for ((index, file) in files.withIndex()) {
+            if (index > 0) {
+                list.addView(View(this).apply {
+                    setBackgroundColor(getColor(R.color.line))
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, density.toInt().coerceAtLeast(1)))
+            }
             val row = RowApkBinding.inflate(layoutInflater, list, false)
             row.apkName.text = file.name
             row.apkMeta.text = "${stamp.format(Date(file.lastModified()))} · ${file.length() / 1024} KB"
@@ -1728,53 +1873,67 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun setupNav() {
         binding.bottomNav.setOnItemSelectedListener { item ->
-            if (settingsOpen) closeSettings()
-            if (boardOpen) closeBoard()
-            if (workspaceOpen) closeWorkspace()
-            val tab = when (item.itemId) {
-                R.id.nav_files -> AppState.Tab.FILES
-                R.id.nav_search -> AppState.Tab.SEARCH
-                R.id.nav_git -> AppState.Tab.GIT
-                R.id.nav_vibe -> AppState.Tab.VIBE
-                R.id.nav_build -> AppState.Tab.BUILD
-                else -> AppState.Tab.CONSOLE
-            }
-            if (tab != AppState.Tab.FILES) saveEditor(announce = false)
-            applyTab(tab)
-            when (tab) {
-                AppState.Tab.BUILD -> onBuild()
-                AppState.Tab.SEARCH -> {
-                    renderFind()
-                    ensureFossFeed()
-                }
-                AppState.Tab.GIT -> if (AppState.gitDetail == null) refreshGit()
-                AppState.Tab.FILES -> if (!editing) refreshFileList()
-                else -> Unit
-            }
+            val tab = AppState.Tab.entries.firstOrNull { navId(it) == item.itemId } ?: return@setOnItemSelectedListener false
+            showTab(tab)
             true
         }
         binding.bottomNav.setOnItemReselectedListener {
             if (settingsOpen) closeSettings()
-            if (boardOpen) closeBoard()
             if (workspaceOpen) closeWorkspace()
         }
-        applyTab(AppState.tab)
-        val navId = navId(AppState.tab)
-        if (binding.bottomNav.selectedItemId != navId) binding.bottomNav.selectedItemId = navId
+        binding.openConsole.setOnClickListener { showTab(AppState.Tab.CONSOLE) }
+        showTab(AppState.tab)
     }
 
-    private fun navId(tab: AppState.Tab): Int = when (tab) {
+    private fun showTab(tab: AppState.Tab) {
+        if (settingsOpen) closeSettings()
+        if (workspaceOpen) closeWorkspace()
+        if (tab != AppState.Tab.FILES) saveEditor(announce = false)
+        applyTab(tab)
+        syncNav(tab)
+        when (tab) {
+            AppState.Tab.BOARD -> renderBoard()
+            AppState.Tab.BUILD -> onBuild()
+            AppState.Tab.SEARCH -> {
+                renderFind()
+                ensureFossFeed()
+            }
+            AppState.Tab.GIT -> if (AppState.gitDetail == null) refreshGit()
+            AppState.Tab.FILES -> if (!editing) refreshFileList()
+            else -> Unit
+        }
+    }
+
+    private fun syncNav(tab: AppState.Tab) {
+        val menu = binding.bottomNav.menu
+        val id = navId(tab)
+        if (id == null) {
+            menu.setGroupCheckable(0, true, false)
+            for (i in 0 until menu.size()) menu.getItem(i).isChecked = false
+            menu.setGroupCheckable(0, true, true)
+        } else {
+            menu.findItem(id)?.isChecked = true
+        }
+        val console = tab == AppState.Tab.CONSOLE
+        val color = getColor(if (console) R.color.accent else R.color.muted)
+        binding.openConsole.setTextColor(color)
+        binding.openConsole.compoundDrawableTintList = android.content.res.ColorStateList.valueOf(color)
+    }
+
+    private fun navId(tab: AppState.Tab): Int? = when (tab) {
+        AppState.Tab.BOARD -> R.id.nav_board
         AppState.Tab.FILES -> R.id.nav_files
         AppState.Tab.SEARCH -> R.id.nav_search
         AppState.Tab.GIT -> R.id.nav_git
         AppState.Tab.VIBE -> R.id.nav_vibe
         AppState.Tab.BUILD -> R.id.nav_build
-        AppState.Tab.CONSOLE -> R.id.nav_console
+        AppState.Tab.CONSOLE -> null
     }
 
     private fun applyTab(tab: AppState.Tab) {
         AppState.tab = tab
         binding.consolePage.root.visibility = if (tab == AppState.Tab.CONSOLE) View.VISIBLE else View.GONE
+        binding.boardPage.root.visibility = if (tab == AppState.Tab.BOARD) View.VISIBLE else View.GONE
         binding.filesPage.root.visibility = if (tab == AppState.Tab.FILES) View.VISIBLE else View.GONE
         binding.searchPage.root.visibility = if (tab == AppState.Tab.SEARCH) View.VISIBLE else View.GONE
         binding.gitPage.root.visibility = if (tab == AppState.Tab.GIT) View.VISIBLE else View.GONE
@@ -1787,8 +1946,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val repos = AppState.reposDir
         binding.filesPage.filesPath.text = AppState.downloadNote ?: RepoFiles.display(cwd, repos)
         binding.filesPage.filesUp.isEnabled = cwd.canonicalPath != repos.canonicalPath
+        val atRoot = cwd.canonicalPath == repos.canonicalPath
         val files = cwd.listFiles()
-            ?.filter { it.name != ".git" }
+            ?.filter { it.name != ".git" && (!atRoot || WorkspaceStore.contains(it)) }
             ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
             .orEmpty()
         displayed = files
@@ -1803,8 +1963,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 return row
             }
         }
-        binding.filesPage.filesEmpty.text = AppState.downloadNote ?: if (cwd.canonicalPath == repos.canonicalPath) {
-            "Find a repo on Search, or tap Open for a folder already on this phone."
+        binding.filesPage.filesEmpty.text = AppState.downloadNote ?: if (atRoot) {
+            if (WorkspaceStore.downloaded().isEmpty()) {
+                "Find a repo on Search, or tap Open for a folder already on this phone."
+            } else {
+                "No repos in ${WorkspaceStore.current().name}. Tap Projects to add downloaded repos, or find one on Search."
+            }
         } else {
             "Empty folder"
         }
@@ -1917,6 +2081,14 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
         val instruction = binding.vibePage.vibePrompt.text?.toString()?.trim().orEmpty()
         if (instruction.isEmpty()) return
+        val root = vibeRoot()
+        if (root == null && currentProvider == Provider.CURSOR) {
+            pickVibeRepo()
+            return
+        }
+        if (root != null && runCatching { AppState.projectRoot() }.getOrNull()?.canonicalFile != root.canonicalFile) {
+            openProject(root)
+        }
         saveEditor(announce = false)
         saveProvider(currentProvider)
         binding.vibePage.vibePrompt.setText("")
@@ -1930,6 +2102,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val open = AppState.openFile
         val cwd = AppState.cwd
         AppState.vibeBusy = true
+        AppState.vibeRepo = root
         AppState.vibeResult = ""
         AppState.writtenPaths = emptyList()
         AppState.agentStop.set(false)
@@ -1937,20 +2110,21 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         UiBridge.vibeUpdate()
         val job = startJob("Agent working", AppState.Tab.VIBE)
         if (provider != Provider.CURSOR) {
-            runAgent(job, instruction, provider, key, model, base, open, cwd)
+            runAgent(job, instruction, provider, key, model, base, open, cwd, root)
             return
         }
         AppState.io.execute {
             DebugLog.step("vibe", "start provider=${provider.id} chars=${instruction.length}")
             var title = "Agent error"
             try {
-                val root = AppState.projectRoot()
+                if (root == null) error("pick a repo at the top of Vibe")
                 val edit = AiClient.edit(
                     root, cwd, open, instruction, provider, key, model, base, AppState.history
                 )
                 val report = buildString {
                     append(edit.report)
                     if (edit.written.isNotEmpty()) {
+                        append("\n\nRepo: ").append(root.name)
                         if (!AppState.gitBusy) {
                             AppState.gitSnapshot = runCatching {
                                 GitOps.snapshot(AppState.cwd, AppState.reposDir)
@@ -1992,7 +2166,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         model: String,
         base: String,
         open: File?,
-        cwd: File
+        cwd: File,
+        start: File?
     ) {
         val appContext = applicationContext
         val buildUrl = store.buildUrl()
@@ -2003,8 +2178,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             var started: AgentContext? = null
             var title = "Agent error"
             try {
-                val root = AppState.projectRoot()
-                val ctx = AgentContext(root, AppState.reposDir, appContext, buildUrl, buildToken)
+                val ctx = AgentContext(start, AppState.reposDir, appContext, buildUrl, buildToken)
                 started = ctx
                 val job = AgentJob(
                     ctx, cwd, open, instruction, provider, key, model, base, earlier, AppState.agentStop
@@ -2017,10 +2191,16 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                     DebugLog.step("agent", line)
                     UiBridge.vibeUpdate()
                 }
+                val root = ctx.root
+                if (root != null && root.canonicalFile != start?.canonicalFile) {
+                    AppState.cwd = root
+                    ProjectStore.remember(appContext, root)
+                    UiBridge.projectChanged()
+                }
                 val report = buildString {
                     append(result.text)
-                    if (result.changed.isNotEmpty()) {
-                        append("\n\nChanged:")
+                    if (root != null && result.changed.isNotEmpty()) {
+                        append("\n\nChanged in ").append(root.name).append(':')
                         result.changed.forEach { file ->
                             append("\n").append(RepoFiles.rel(file, root))
                             if (!file.exists()) append(" (deleted)")
@@ -2046,9 +2226,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 val changed = ctx?.changed?.toList().orEmpty()
                 val msg = buildString {
                     append(t.message ?: t.javaClass.simpleName)
-                    if (ctx != null && changed.isNotEmpty()) {
-                        append("\n\nChanged before the error:")
-                        changed.forEach { append("\n").append(RepoFiles.rel(it, ctx.root)) }
+                    val root = ctx?.root
+                    if (root != null && changed.isNotEmpty()) {
+                        append("\n\nChanged in ").append(root.name).append(" before the error:")
+                        changed.forEach { append("\n").append(RepoFiles.rel(it, root)) }
                     }
                 }
                 AppState.vibeResult = msg
@@ -2066,7 +2247,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun syncBack() {
-        backCallback.isEnabled = settingsOpen || boardOpen || workspaceOpen || editing || AppState.gitDetail != null
+        backCallback.isEnabled = settingsOpen || workspaceOpen || editing || AppState.gitDetail != null
     }
 
     private fun pickFolder() {
@@ -2084,6 +2265,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.io.execute {
             try {
                 val dest = FolderImport.importTree(app, uri, AppState.reposDir, AppState::log)
+                WorkspaceStore.include(dest.name)
                 AppState.cwd = dest.canonicalFile
                 ProjectStore.remember(app, AppState.cwd)
                 AppState.gitDetail = null
@@ -2099,23 +2281,26 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun showProjects() {
-        val dirs = AppState.reposDir.listFiles()
-            ?.filter { it.isDirectory && !it.name.startsWith(".") }
-            ?.sortedBy { it.name.lowercase() }
-            .orEmpty()
+        val dirs = WorkspaceStore.activeRepos()
         if (dirs.isEmpty()) {
-            AppState.log("No saved projects. Clone one, or tap Open.")
+            if (WorkspaceStore.downloaded().isEmpty()) {
+                AppState.log("No saved projects. Clone one, or tap Open.")
+            } else {
+                openWorkspace()
+            }
             return
         }
         AlertDialog.Builder(this)
-            .setTitle("Projects")
+            .setTitle(WorkspaceStore.current().name)
             .setItems(dirs.map { it.name }.toTypedArray()) { _, which -> openProject(dirs[which]) }
+            .setNeutralButton("Edit repos") { _, _ -> openWorkspace() }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun openProject(dir: File) {
         if (editing) closeEditor(save = true)
+        WorkspaceStore.include(dir.name)
         AppState.cwd = dir.canonicalFile
         ProjectStore.remember(this, AppState.cwd)
         AppState.gitDetail = null
@@ -2123,7 +2308,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         refreshFileList()
         if (AppState.tab == AppState.Tab.GIT) refreshGit()
         AppState.log("opened ${dir.name}")
-        noteRepo()
+        renderVibeRepo()
+        paintTape()
+        if (workspaceOpen) renderRepoChecks()
     }
 
     private fun refreshGit() {

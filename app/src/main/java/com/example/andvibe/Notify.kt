@@ -137,6 +137,7 @@ object Notify {
         AppState.Tab.GIT -> R.drawable.ic_nav_git
         AppState.Tab.FILES -> R.drawable.ic_nav_files
         AppState.Tab.SEARCH -> R.drawable.ic_nav_search
+        AppState.Tab.BOARD -> R.drawable.ic_nav_board
         else -> R.drawable.ic_nav_console
     }
 }

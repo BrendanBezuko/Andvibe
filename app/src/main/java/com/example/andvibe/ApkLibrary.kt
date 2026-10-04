@@ -8,6 +8,21 @@ import java.util.Locale
 
 object ApkLibrary {
     fun dir(context: Context): File {
+        val base = base(context)
+        val folder = File(base, WorkspaceStore.current().id)
+        folder.mkdirs()
+        base.listFiles()
+            ?.filter { it.isFile && it.name.endsWith(".apk") }
+            ?.forEach { it.renameTo(File(folder, it.name)) }
+        return folder
+    }
+
+    fun forget(context: Context, workspace: String) {
+        if (workspace.isBlank()) return
+        File(base(context), workspace).deleteRecursively()
+    }
+
+    private fun base(context: Context): File {
         val folder = context.getExternalFilesDir("apk") ?: File(context.filesDir, "apk")
         folder.mkdirs()
         return folder

@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
+        android:id="@+id/nav_board"
+        android:icon="@drawable/ic_nav_board"
+        android:title="Board" />
+    <item
         android:id="@+id/nav_search"
         android:icon="@drawable/ic_nav_search"
         android:title="Search" />
@@ -20,8 +24,4 @@
         android:id="@+id/nav_git"
         android:icon="@drawable/ic_nav_git"
         android:title="Git" />
-    <item
-        android:id="@+id/nav_console"
-        android:icon="@drawable/ic_nav_console"
-        android:title="Console" />
 </menu>

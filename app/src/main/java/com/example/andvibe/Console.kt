@@ -79,7 +79,7 @@ HTML projects open in a preview.
         val target = if (args.isEmpty()) {
             AppState.cwd
         } else {
-            RepoFiles.resolve(AppState.cwd, AppState.reposDir, args[0])
+            resolve(args[0])
         }
         if (!target.exists()) error("no such path")
         if (target.isFile) {
@@ -87,7 +87,7 @@ HTML projects open in a preview.
             return
         }
         val kids = target.listFiles()
-            ?.filter { it.name != ".git" }
+            ?.filter { it.name != ".git" && WorkspaceStore.contains(it) }
             ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
             .orEmpty()
         if (kids.isEmpty()) AppState.log("(empty)")
@@ -98,7 +98,7 @@ HTML projects open in a preview.
         val dir = if (args.isEmpty()) {
             AppState.reposDir
         } else {
-            RepoFiles.resolve(AppState.cwd, AppState.reposDir, args[0])
+            resolve(args[0])
         }
         if (!dir.isDirectory) error("not a directory")
         AppState.cwd = dir
@@ -111,7 +111,7 @@ HTML projects open in a preview.
 
     private fun cat(args: List<String>) {
         if (args.isEmpty()) error("usage: cat <file>")
-        val file = RepoFiles.resolve(AppState.cwd, AppState.reposDir, args[0])
+        val file = resolve(args[0])
         if (!file.isFile) error("not a file")
         if (file.length() > 64_000) error("file too large to print")
         if (RepoFiles.looksBinary(file)) error("binary file")
@@ -120,19 +120,19 @@ HTML projects open in a preview.
 
     private fun open(args: List<String>) {
         if (args.isEmpty()) error("usage: open <file>")
-        val file = RepoFiles.resolve(AppState.cwd, AppState.reposDir, args[0])
+        val file = resolve(args[0])
         if (!file.isFile) error("not a file")
         UiBridge.open(file)
     }
 
     private fun projects() {
-        val dirs = AppState.reposDir.listFiles()
-            ?.filter { it.isDirectory && !it.name.startsWith(".") }
-            ?.sortedBy { it.name.lowercase() }
-            .orEmpty()
-        if (dirs.isEmpty()) AppState.log("no projects. git clone, or Open a folder on the Files tab")
+        val dirs = WorkspaceStore.activeRepos()
+        if (dirs.isEmpty()) AppState.log("no repos in this workspace. git clone, or pick downloaded repos on the Workspace page")
         else dirs.forEach { AppState.log(it.name + "/") }
     }
+
+    private fun resolve(raw: String): File =
+        AppState.inWorkspace(RepoFiles.resolve(AppState.cwd, AppState.reposDir, raw))
 
     private fun git(args: List<String>) {
         if (args.isEmpty()) {
@@ -148,6 +148,7 @@ HTML projects open in a preview.
                 val name = if (args.size == 3) GitClient.safeRepoName(args[2]) else GitClient.repoNameFromUrl(url)
                 val dest = File(repos, name)
                 GitClient.clone(url, dest, AppState::log)
+                WorkspaceStore.include(dest.name)
                 AppState.cwd = dest.canonicalFile
                 ProjectStore.remember(AppState.appContext, AppState.cwd)
                 UiBridge.filesChanged()
@@ -202,7 +203,7 @@ HTML projects open in a preview.
 
     private fun runFile(arg: String?) {
         if (arg != null) {
-            val file = RepoFiles.resolve(AppState.cwd, AppState.reposDir, arg)
+            val file = resolve(arg)
             if (!file.isFile) {
                 AppState.log("no such file")
                 return

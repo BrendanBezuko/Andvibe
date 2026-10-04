@@ -18,6 +18,8 @@ object AiClient {
         Reply with one JSON object and nothing else:
         {"summary":"what changed","files":[{"path":"relative/path.js","content":"the full new file"}]}
 
+        Change the existing code in this repo. Do not rewrite the project from scratch or scaffold a separate app unless the user explicitly asks for a new project.
+
         Paths are relative to the repo root. Use forward slashes. Never use .. or absolute paths. Include the complete contents of every file you change or create. Omit files you do not change. If no files change, return an empty files array and put the answer in summary. Do not wrap the JSON in markdown.
     """.trimIndent()
 

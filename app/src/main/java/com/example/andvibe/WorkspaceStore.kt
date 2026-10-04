@@ -34,6 +34,7 @@ object WorkspaceStore {
     private lateinit var file: File
     private var ready = false
     private var currentId = ""
+    private var scoped = false
     private val items = mutableListOf<Workspace>()
 
     fun init(context: android.content.Context) {
@@ -53,13 +54,40 @@ object WorkspaceStore {
         live().cards.filter { it.column == column.id }
     }
 
-    fun repoNames(): List<String> {
-        val saved = current().repos
-        val onDisk = AppState.reposDir.listFiles()
+    fun downloaded(): List<String> {
+        return AppState.reposDir.listFiles()
             ?.filter { it.isDirectory && !it.name.startsWith(".") }
-            ?.map { it.name }
+            ?.mapNotNull { cleanRepo(it.name) }
+            ?.sortedBy { it.lowercase() }
             .orEmpty()
-        return (onDisk + saved).mapNotNull { cleanRepo(it) }.distinct().sortedBy { it.lowercase() }
+    }
+
+    fun activeRepos(): List<File> {
+        val names = current().repos
+        return downloaded().filter { it in names }.map { File(AppState.reposDir, it) }
+    }
+
+    fun contains(file: File): Boolean {
+        val root = AppState.reposDir.canonicalFile
+        val canon = file.canonicalFile
+        if (canon == root) return true
+        if (!canon.path.startsWith(root.path + File.separator)) return false
+        return RepoFiles.rel(canon, root).substringBefore('/') in current().repos
+    }
+
+    fun include(name: String) = setRepo(name, true)
+
+    fun migrate() {
+        synchronized(this) {
+            if (scoped) return
+            scoped = true
+            if (items.all { it.repos.isEmpty() }) {
+                val names = downloaded().toSet()
+                val index = items.indexOfFirst { it.id == currentId }
+                if (index >= 0 && names.isNotEmpty()) items[index] = items[index].copy(repos = names)
+            }
+            save()
+        }
     }
 
     fun rename(name: String) {
@@ -96,17 +124,6 @@ object WorkspaceStore {
         if (items.none { it.id == id }) return false
         items.removeAll { it.id == id }
         if (currentId == id || items.none { it.id == currentId }) currentId = items.first().id
-        save()
-        true
-    }
-
-    fun adopt(repoName: String): Boolean = synchronized(this) {
-        val name = cleanRepo(repoName) ?: return false
-        val cur = live()
-        if (name in cur.repos) return false
-        val match = items.firstOrNull { name in it.repos } ?: return false
-        if (match.id == currentId) return false
-        currentId = match.id
         save()
         true
     }
@@ -237,6 +254,7 @@ object WorkspaceStore {
             runCatching {
                 val json = JSONObject(text)
                 currentId = json.optString("current")
+                scoped = json.optBoolean("scoped", false)
                 val arr = json.optJSONArray("items") ?: JSONArray()
                 for (i in 0 until arr.length()) {
                     val obj = arr.optJSONObject(i) ?: continue
@@ -325,7 +343,7 @@ object WorkspaceStore {
                         .put("cards", cards)
                 )
             }
-            val json = JSONObject().put("current", currentId).put("items", arr)
+            val json = JSONObject().put("current", currentId).put("scoped", scoped).put("items", arr)
             val tmp = File(file.parentFile, file.name + ".tmp")
             tmp.writeText(json.toString())
             if (!tmp.renameTo(file)) {

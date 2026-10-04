@@ -6,13 +6,19 @@ import org.json.JSONObject
 import java.io.File
 
 class AgentContext(
-    val root: File,
+    @Volatile var root: File?,
     val repos: File,
     val app: Context,
     val buildUrl: String,
     val buildToken: String
 ) {
     val changed = linkedSetOf<File>()
+
+    val repo: File
+        get() = root ?: error(
+            "no repo is selected. Ask the user to pick one at the top of the Vibe tab, " +
+                "or call create_project if they asked for a new project."
+        )
 }
 
 class ToolSpec(val name: String, val description: String, val schema: JSONObject)
@@ -100,6 +106,14 @@ object AgentTools {
             "cloud_build",
             "Compile a Gradle project on Cloud Run with assembleDebug and return the end of the build log. Takes several minutes. Only works when the repo has gradlew.",
             schema()
+        ),
+        ToolSpec(
+            "create_project",
+            "Create a new empty project folder with its own git repo, add it to the workspace, and switch to it. Every later tool call works in the new project. Only call this when the user explicitly asks for a new project, app, or repo. Never use it to start over on the current repo.",
+            schema(
+                "name" to prop("string", "Folder name. Letters, digits, dot, dash, and underscore."),
+                required = listOf("name")
+            )
         )
     )
 
@@ -123,10 +137,11 @@ object AgentTools {
             )
             "write_file" -> writeFile(ctx, args.optString("path"), args.optString("content"))
             "delete_file" -> deleteFile(ctx, args.optString("path"))
-            "git_status" -> GitOps.status(ctx.root, ctx.repos)
-            "git_diff" -> GitOps.diff(ctx.root, ctx.repos, args.optString("path").ifBlank { null }, false)
-            "run_js_tests" -> JsRunner.compile(ctx.root) + "\n\n" + JsRunner.test(ctx.root)
+            "git_status" -> GitOps.status(ctx.repo, ctx.repos)
+            "git_diff" -> GitOps.diff(ctx.repo, ctx.repos, args.optString("path").ifBlank { null }, false)
+            "run_js_tests" -> JsRunner.compile(ctx.repo) + "\n\n" + JsRunner.test(ctx.repo)
             "cloud_build" -> cloudBuild(ctx)
+            "create_project" -> createProject(ctx, args.optString("name"))
             else -> error("unknown tool $name")
         }
     }
@@ -149,12 +164,13 @@ object AgentTools {
             "git_diff" -> "git diff ${path}".trimEnd()
             "run_js_tests" -> "run JavaScript tests"
             "cloud_build" -> "build on Cloud Run"
+            "create_project" -> "create project ${args.optString("name")}"
             else -> name
         }
     }
 
     private fun listDir(ctx: AgentContext, raw: String, depthRaw: Int): String {
-        val dir = target(ctx.root, raw)
+        val dir = target(ctx.repo, raw)
         if (!dir.isDirectory) error("not a folder: $raw")
         val depth = depthRaw.coerceIn(1, 4)
         val lines = mutableListOf<String>()
@@ -162,7 +178,7 @@ object AgentTools {
             val kids = folder.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })) ?: return
             for (kid in kids) {
                 if (lines.size >= MAX_LIST) return
-                val rel = RepoFiles.rel(kid, ctx.root)
+                val rel = RepoFiles.rel(kid, ctx.repo)
                 if (kid.isDirectory) {
                     if (kid.name in RepoFiles.SKIP_DIRS) continue
                     lines.add("$rel/")
@@ -179,7 +195,7 @@ object AgentTools {
     }
 
     private fun readFile(ctx: AgentContext, raw: String, startRaw: Int, endRaw: Int): String {
-        val file = target(ctx.root, raw)
+        val file = target(ctx.repo, raw)
         if (!file.isFile) error("no such file: $raw")
         if (file.length() > 4_000_000) error("file is ${size(file.length())}, too large to read")
         if (RepoFiles.looksBinary(file)) error("binary file: $raw")
@@ -205,13 +221,13 @@ object AgentTools {
             error("bad regex: ${e.message}")
         }
         val matcher = if (glob.isBlank()) null else globRegex(glob.trim())
-        val start = target(ctx.root, raw.ifBlank { "." })
+        val start = target(ctx.repo, raw.ifBlank { "." })
         val hits = mutableListOf<String>()
         var files = 0
         fun scan(file: File) {
             if (hits.size >= MAX_GREP_HITS) return
             if (file.length() > 1_500_000 || RepoFiles.looksBinary(file)) return
-            val rel = RepoFiles.rel(file, ctx.root)
+            val rel = RepoFiles.rel(file, ctx.repo)
             if (matcher != null) {
                 val subject = if (glob.contains('/')) rel else file.name
                 if (!matcher.matches(subject)) return
@@ -235,7 +251,7 @@ object AgentTools {
     }
 
     private fun editFile(ctx: AgentContext, raw: String, old: String, new: String, all: Boolean): String {
-        val file = writable(ctx.root, raw)
+        val file = writable(ctx.repo, raw)
         if (!file.isFile) error("no such file: $raw. Use write_file to create it.")
         if (old.isEmpty()) error("old_string is empty")
         if (old == new) error("old_string and new_string are the same")
@@ -260,7 +276,7 @@ object AgentTools {
 
     private fun writeFile(ctx: AgentContext, raw: String, content: String): String {
         if (content.length > MAX_WRITE) error("content is over 500KB")
-        val file = writable(ctx.root, raw)
+        val file = writable(ctx.repo, raw)
         if (file.isDirectory) error("$raw is a folder")
         val existed = file.isFile
         file.parentFile?.mkdirs()
@@ -271,7 +287,7 @@ object AgentTools {
     }
 
     private fun deleteFile(ctx: AgentContext, raw: String): String {
-        val file = writable(ctx.root, raw)
+        val file = writable(ctx.repo, raw)
         if (!file.isFile) error("no such file: $raw")
         if (!file.delete()) error("could not delete $raw")
         ctx.changed.add(file)
@@ -279,7 +295,7 @@ object AgentTools {
     }
 
     private fun cloudBuild(ctx: AgentContext): String {
-        if (!File(ctx.root, "gradlew").isFile) error("this repo has no gradlew, so Cloud Run cannot build it")
+        if (!File(ctx.repo, "gradlew").isFile) error("this repo has no gradlew, so Cloud Run cannot build it")
         if (ctx.buildUrl.isBlank() || ctx.buildToken.isBlank()) {
             error("the Cloud Run URL or token is not set. The user sets them on Console → Variables.")
         }
@@ -294,21 +310,42 @@ object AgentTools {
                 if (log.length > 200_000) log.delete(0, log.length - 120_000)
             }
         }
+        val started = System.currentTimeMillis()
+        var built: File? = null
+        var summary = ""
         try {
-            note("Agent build. Sending ${ctx.root.name} to Cloud Run.")
-            val apk = CloudBuild.build(ctx.app, ctx.root, ctx.buildUrl, ctx.buildToken, note)
+            note("Agent build. Sending ${ctx.repo.name} to Cloud Run.")
+            val apk = CloudBuild.build(ctx.app, ctx.repo, ctx.buildUrl, ctx.buildToken, note)
             AppState.lastApk = apk.absolutePath
+            built = apk
+            summary = "Agent build: ${apk.name}"
             note("APK")
             note(apk.absolutePath)
             return "BUILD SUCCESSFUL\nAPK: ${apk.name}\n\n" + tail(log.toString(), 3_000)
         } catch (t: Throwable) {
             val message = t.message ?: t.javaClass.simpleName
+            summary = "Agent build failed: $message"
             note("build failed: $message")
             return "BUILD FAILED: $message\n\n" + tail(log.toString(), 14_000)
         } finally {
+            BuildHistory.record(ctx.repo.name, started, built != null, built?.name, summary, AppState.buildText())
             AppState.buildBusy = false
             UiBridge.buildUpdate()
         }
+    }
+
+    private fun createProject(ctx: AgentContext, raw: String): String {
+        val name = runCatching { GitClient.safeRepoName(raw) }.getOrElse { error("bad project name: $raw") }
+        val dir = File(ctx.repos, name).canonicalFile
+        RepoFiles.ensureInside(ctx.repos, dir)
+        if (dir.exists() && !dir.list().isNullOrEmpty()) error("~/$name already exists. Pick another name.")
+        if (!dir.mkdirs() && !dir.isDirectory) error("could not create ~/$name")
+        val git = GitOps.init(dir)
+        WorkspaceStore.include(name)
+        ctx.root = dir
+        AppState.vibeRepo = dir
+        UiBridge.vibeUpdate()
+        return "created ~/$name ($git). It is now the repo for every later tool call; paths are relative to it."
     }
 
     private fun target(root: File, raw: String): File {

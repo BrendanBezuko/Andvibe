@@ -28,6 +28,11 @@ object Agent {
     private val systemPrompt = """
         You are a coding agent working inside AndVibe, an Android app. The user's repo is stored on this phone, and you change it only through the tools you are given. There is no shell.
 
+        Which code to change:
+        - Work on the existing code in the selected repo. Fix, extend, or refactor what is already there. Do not rewrite the project from scratch, scaffold a separate app, or put new work in a new folder.
+        - Only call create_project when the user explicitly asks for a new project, app, or repo. If the request could go either way, change the existing repo.
+        - If no repo is selected and the user did not ask for a new project, do not create one. Reply asking them to pick a repo at the top of the Vibe tab.
+
         How to work:
         - Explore before you edit. Use grep and list_dir to find the code, and read_file to read it. Do not guess at file contents.
         - Change files with edit_file. Copy old_string exactly from read_file output, without the line-number prefix, and include enough surrounding lines to make it unique. Use write_file for new files.
@@ -109,7 +114,7 @@ object Agent {
         val first = result.output.lineSequence().firstOrNull().orEmpty().take(200)
         return when {
             result.error -> first
-            name in WRITES || name == "cloud_build" || name == "run_js_tests" -> first
+            name in WRITES || name == "cloud_build" || name == "run_js_tests" || name == "create_project" -> first
             name == "grep" && first.startsWith("no matches") -> first
             else -> null
         }
@@ -126,23 +131,35 @@ object Agent {
 
     private fun firstMessage(job: AgentJob): String {
         val root = job.ctx.root
+        val others = WorkspaceStore.activeRepos().map { it.name }.filter { it != root?.name }
         return buildString {
-            append("Repo: ").append(root.name).append('\n')
-            append("Working directory: ").append(RepoFiles.rel(job.cwd, root).ifBlank { "." }).append('\n')
-            job.open?.takeIf { it.isFile }?.let {
-                append("Open in the editor: ").append(RepoFiles.rel(it, root)).append('\n')
-            }
-            append("Gradle wrapper: ").append(if (File(root, "gradlew").isFile) "yes, cloud_build works" else "no").append('\n')
-            append("\nFile tree (partial):\n").append(AiClient.tree(root, 150)).append("\n\n")
-            val status = runCatching { GitOps.status(root, job.ctx.repos) }.getOrNull()
-            if (!status.isNullOrBlank()) append("Git status:\n").append(status.take(3_000)).append("\n\n")
-            for (name in listOf("AGENTS.md", "CLAUDE.md", ".cursorrules")) {
-                val file = File(root, name)
-                if (file.isFile && file.length() < 200_000) {
-                    append("Repo instructions from ").append(name).append(":\n")
-                    append(file.readText().take(6_000)).append("\n\n")
-                    break
+            if (root == null) {
+                append("Repo: none selected\n")
+            } else {
+                append("Repo: ").append(root.name).append(" (every tool works only inside this repo)\n")
+                append("Working directory: ").append(RepoFiles.rel(job.cwd, root).ifBlank { "." }).append('\n')
+                job.open?.takeIf { it.isFile }?.let {
+                    append("Open in the editor: ").append(RepoFiles.rel(it, root)).append('\n')
                 }
+                append("Gradle wrapper: ").append(if (File(root, "gradlew").isFile) "yes, cloud_build works" else "no").append('\n')
+            }
+            if (others.isNotEmpty()) {
+                append("Other repos in this workspace (not reachable by tools): ").append(others.joinToString(", ")).append('\n')
+            }
+            if (root != null) {
+                append("\nFile tree (partial):\n").append(AiClient.tree(root, 150)).append("\n\n")
+                val status = runCatching { GitOps.status(root, job.ctx.repos) }.getOrNull()
+                if (!status.isNullOrBlank()) append("Git status:\n").append(status.take(3_000)).append("\n\n")
+                for (name in listOf("AGENTS.md", "CLAUDE.md", ".cursorrules")) {
+                    val file = File(root, name)
+                    if (file.isFile && file.length() < 200_000) {
+                        append("Repo instructions from ").append(name).append(":\n")
+                        append(file.readText().take(6_000)).append("\n\n")
+                        break
+                    }
+                }
+            } else {
+                append('\n')
             }
             if (job.earlier.isNotEmpty()) {
                 append("Earlier in this chat:\n")
