@@ -34,7 +34,7 @@ object CloudBuild {
             log("zipping ${root.name}")
             val size = writeZip(root, zip, log)
             log("uploading ${size / 1024} KB to $endpoint")
-            log("Cloud Run is compiling. Keep AndVibe open. The log streams here.")
+            log("Cloud Run is compiling. The log streams here. You can leave AndVibe; a notification pings when it is done.")
             val apk = post(context, endpoint, token, zip, result, root, log)
             DebugLog.step("cloud", "done ${System.currentTimeMillis() - started}ms path=${apk.absolutePath} bytes=${apk.length()}")
             return apk

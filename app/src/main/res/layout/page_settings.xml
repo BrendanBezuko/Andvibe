@@ -67,6 +67,42 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
+            android:text="Background"
+            android:textColor="@color/ink"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/backgroundStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:fontFamily="monospace"
+            android:lineSpacingExtra="2dp"
+            android:textColor="@color/ink"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/allowBackground"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="40dp"
+            android:text="Allow background"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Builds, agent runs, clones, and push or pull keep going after you leave AndVibe. A notification pings when each one finishes. Turning off battery optimization stops Android from pausing the network during long Cloud Run builds."
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
             android:text="MCP"
             android:textColor="@color/ink"
             android:textSize="14sp" />

@@ -7,6 +7,7 @@ class AndVibeApp : Application() {
         super.onCreate()
         // Read by JGit the first time its filesystem helper loads.
         System.setProperty("jgit.fs.useFileAttributesCache", "false")
+        Notify.channels(this)
         DebugMcp.start()
     }
 }

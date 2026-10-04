@@ -1,10 +1,13 @@
 package com.example.andvibe
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
 import android.text.SpannableString
@@ -77,6 +80,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
     }
 
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        askBatteryExemption()
+        renderBackground()
+    }
+
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
             if (settingsOpen) {
@@ -131,6 +139,23 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         onVibe()
         onBuild()
         onGit()
+        openTabFrom(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openTabFrom(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        Jobs.visible = true
+        if (settingsOpen) renderBackground()
+    }
+
+    override fun onStop() {
+        Jobs.visible = false
+        super.onStop()
     }
 
     override fun onPause() {
@@ -382,6 +407,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
         }
         binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+        binding.settingsPage.allowBackground.setOnClickListener { requestBackground() }
         binding.settingsPage.saveGit.setOnClickListener { saveGitSettings() }
         binding.settingsPage.saveApiKeys.setOnClickListener { saveApiKeys(announce = true) }
         binding.settingsPage.showApiKeys.setOnCheckedChangeListener { _, checked ->
@@ -403,10 +429,76 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         if (workspaceOpen) closeWorkspace()
         settingsOpen = true
         binding.settingsPage.mcpStatus.text = DebugMcp.statusText()
+        renderBackground()
         loadGitSettings()
         loadApiKeys()
         binding.settingsPage.root.visibility = View.VISIBLE
         syncBack()
+    }
+
+    private fun startJob(label: String, tab: AppState.Tab): Jobs.Job {
+        val prefs = getSharedPreferences("andvibe_background", MODE_PRIVATE)
+        if (!prefs.getBoolean("asked", false)) {
+            prefs.edit().putBoolean("asked", true).apply()
+            requestBackground()
+        }
+        return Jobs.begin(this, label, tab)
+    }
+
+    private fun requestBackground() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        if (!Notify.allowed(this)) {
+            openNotificationSettings()
+            return
+        }
+        askBatteryExemption()
+    }
+
+    private fun openNotificationSettings() {
+        val intent = if (Build.VERSION.SDK_INT >= 26) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        }
+        runCatching { startActivity(intent) }
+    }
+
+    private fun batteryExempt(): Boolean =
+        getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) == true
+
+    @Suppress("BatteryLife")
+    private fun askBatteryExemption() {
+        if (batteryExempt()) return
+        try {
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
+            )
+        } catch (_: Exception) {
+            runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+        }
+    }
+
+    private fun renderBackground() {
+        val notify = if (Notify.allowed(this)) "on" else "off"
+        val battery = if (batteryExempt()) "unrestricted" else "optimized"
+        binding.settingsPage.backgroundStatus.text = "notifications  $notify\nbattery        $battery"
+        binding.settingsPage.allowBackground.visibility =
+            if (notify == "on" && batteryExempt()) View.GONE else View.VISIBLE
+    }
+
+    private fun openTabFrom(intent: Intent?) {
+        val name = intent?.getStringExtra(Notify.EXTRA_TAB) ?: return
+        intent.removeExtra(Notify.EXTRA_TAB)
+        val tab = AppState.Tab.entries.firstOrNull { it.name == name } ?: return
+        if (settingsOpen) closeSettings()
+        if (boardOpen) closeBoard()
+        if (workspaceOpen) closeWorkspace()
+        binding.bottomNav.selectedItemId = navId(tab)
     }
 
     private fun closeSettings() {
@@ -936,11 +1028,17 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         if (line.isEmpty()) return
         binding.consolePage.commandInput.setText("")
         AppState.log("$ $line")
+        val parts = Console.tokenize(line)
+        val slow = parts.getOrNull(0) == "git" && parts.getOrNull(1) in setOf("clone", "push", "pull", "fetch")
+        val job = if (slow) startJob(parts.take(2).joinToString(" "), AppState.Tab.CONSOLE) else null
         AppState.io.execute {
             try {
                 Console.run(line)
+                if (job != null) Jobs.end(job, "${job.label} finished", line)
             } catch (t: Throwable) {
-                AppState.log("error: ${t.message ?: t.javaClass.simpleName}")
+                val msg = t.message ?: t.javaClass.simpleName
+                AppState.log("error: $msg")
+                if (job != null) Jobs.end(job, "${job.label} failed", msg)
             }
         }
     }
@@ -1102,6 +1200,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         refreshFileList()
         AppState.log("clone ${hit.cloneUrl}")
         val app = applicationContext
+        val job = startJob("Cloning ${hit.name}", AppState.Tab.FILES)
         AppState.io.execute {
             var failed: String? = null
             try {
@@ -1128,6 +1227,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 AppState.downloadBusy = false
                 AppState.downloadNote = null
                 UiBridge.filesChanged()
+                if (failed == null) Jobs.end(job, "Clone finished", "${hit.name} is open in Files.")
+                else Jobs.end(job, "Clone failed", failed.orEmpty())
             }
             val message = failed ?: return@execute
             runOnUiThread {
@@ -1308,13 +1409,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             refreshGit()
         }
         page.gitPull.setOnClickListener {
-            runGit {
+            runGit("Pull") {
                 AppState.gitDetail = null
                 GitOps.pull(AppState.cwd, AppState.reposDir)
             }
         }
         page.gitPush.setOnClickListener {
-            runGit {
+            runGit("Push") {
                 AppState.gitDetail = null
                 GitOps.push(AppState.cwd, AppState.reposDir)
             }
@@ -1420,8 +1521,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.buildBusy = true
         AppState.clearBuild()
         val appContext = applicationContext
+        val job = startJob("Building APK", AppState.Tab.BUILD)
         AppState.io.execute {
             var cloud = false
+            var title = "Build failed"
+            var summary = ""
+            var built: File? = null
             try {
                 val root = AppState.projectRoot()
                 cloud = File(root, "gradlew").isFile
@@ -1430,7 +1535,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 if (cloud) {
                     if (url.isBlank() || token.isBlank()) {
                         DebugLog.step("build", "missing url or token")
-                        AppState.buildLog("Set the build URL and token on Console → Variables.")
+                        title = "Build needs setup"
+                        summary = "Set the build URL and token on Console → Variables."
+                        AppState.buildLog(summary)
                     } else {
                         DebugLog.step("build", "mode=cloud")
                         val note: (String) -> Unit = { line ->
@@ -1444,6 +1551,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                         note("APK")
                         note(apk.absolutePath)
                         note("Tap Install.")
+                        built = apk
+                        title = "Build ready"
+                        summary = "${root.name}: ${apk.name}"
                     }
                 } else {
                     DebugLog.step("build", "mode=local")
@@ -1459,15 +1569,20 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                     AppState.buildLog("APK")
                     AppState.buildLog(apk.absolutePath)
                     AppState.buildLog("Tap Install. The new app is named Built app.")
+                    built = apk
+                    title = "Build ready"
+                    summary = "${root.name}: ${apk.name}"
                 }
             } catch (t: Throwable) {
                 DebugLog.step("build", "fail ${t.javaClass.simpleName}: ${t.message}")
                 val message = "build failed: ${t.message ?: t.javaClass.simpleName}"
                 AppState.buildLog(message)
                 if (cloud) AppState.log(message)
+                summary = t.message ?: t.javaClass.simpleName
             } finally {
                 AppState.buildBusy = false
                 UiBridge.buildUpdate()
+                Jobs.end(job, title, summary, built)
             }
         }
     }
@@ -1495,11 +1610,14 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         UiBridge.buildUpdate()
         val open = AppState.openFile
         val cwd = AppState.cwd
+        val job = startJob("Revising from build log", AppState.Tab.BUILD)
         AppState.io.execute {
             val note: (String) -> Unit = { line ->
                 AppState.buildLog(line)
                 AppState.log(line)
             }
+            var title = "Revise failed"
+            var summary = ""
             try {
                 val root = AppState.projectRoot()
                 DebugLog.step("revise", "start provider=${provider.id} chars=${log.length}")
@@ -1528,12 +1646,16 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 }
                 note("Tap Build APK to compile again.")
                 DebugLog.step("revise", "done files=${edit.written.size}")
+                title = "Revise finished"
+                summary = "${edit.written.size} files changed. Tap Build APK to compile again.\n\n${edit.report}"
             } catch (t: Throwable) {
                 DebugLog.step("revise", "fail ${t.javaClass.simpleName}: ${t.message}")
                 note("revise failed: ${t.message ?: t.javaClass.simpleName}")
+                summary = t.message ?: t.javaClass.simpleName
             } finally {
                 AppState.reviseBusy = false
                 UiBridge.buildUpdate()
+                Jobs.end(job, title, summary)
             }
         }
     }
@@ -1637,15 +1759,17 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             if (workspaceOpen) closeWorkspace()
         }
         applyTab(AppState.tab)
-        val navId = when (AppState.tab) {
-            AppState.Tab.FILES -> R.id.nav_files
-            AppState.Tab.SEARCH -> R.id.nav_search
-            AppState.Tab.GIT -> R.id.nav_git
-            AppState.Tab.VIBE -> R.id.nav_vibe
-            AppState.Tab.BUILD -> R.id.nav_build
-            AppState.Tab.CONSOLE -> R.id.nav_console
-        }
+        val navId = navId(AppState.tab)
         if (binding.bottomNav.selectedItemId != navId) binding.bottomNav.selectedItemId = navId
+    }
+
+    private fun navId(tab: AppState.Tab): Int = when (tab) {
+        AppState.Tab.FILES -> R.id.nav_files
+        AppState.Tab.SEARCH -> R.id.nav_search
+        AppState.Tab.GIT -> R.id.nav_git
+        AppState.Tab.VIBE -> R.id.nav_vibe
+        AppState.Tab.BUILD -> R.id.nav_build
+        AppState.Tab.CONSOLE -> R.id.nav_console
     }
 
     private fun applyTab(tab: AppState.Tab) {
@@ -1811,12 +1935,14 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.agentStop.set(false)
         synchronized(AppState.agentSteps) { AppState.agentSteps.clear() }
         UiBridge.vibeUpdate()
+        val job = startJob("Agent working", AppState.Tab.VIBE)
         if (provider != Provider.CURSOR) {
-            runAgent(instruction, provider, key, model, base, open, cwd)
+            runAgent(job, instruction, provider, key, model, base, open, cwd)
             return
         }
         AppState.io.execute {
             DebugLog.step("vibe", "start provider=${provider.id} chars=${instruction.length}")
+            var title = "Agent error"
             try {
                 val root = AppState.projectRoot()
                 val edit = AiClient.edit(
@@ -1843,6 +1969,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 AppState.writtenPaths = edit.written.map { it.canonicalPath }
                 DebugLog.step("vibe", "done files=${edit.written.size}")
                 AppState.log(report)
+                title = "Agent finished"
             } catch (t: Throwable) {
                 val msg = t.message ?: t.javaClass.simpleName
                 AppState.vibeResult = msg
@@ -1852,11 +1979,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             }             finally {
                 AppState.vibeBusy = false
                 UiBridge.vibeUpdate()
+                Jobs.end(job, title, AppState.vibeResult)
             }
         }
     }
 
     private fun runAgent(
+        job: Jobs.Job,
         instruction: String,
         provider: Provider,
         key: String,
@@ -1872,6 +2001,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.agentIo.execute {
             DebugLog.step("agent", "start provider=${provider.id} model=$model chars=${instruction.length}")
             var started: AgentContext? = null
+            var title = "Agent error"
             try {
                 val root = AppState.projectRoot()
                 val ctx = AgentContext(root, AppState.reposDir, appContext, buildUrl, buildToken)
@@ -1910,6 +2040,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 AppState.vibeResult = report
                 DebugLog.step("agent", "done steps=${result.steps} files=${result.changed.size}")
                 AppState.log(report)
+                title = if (AppState.agentStop.get()) "Agent stopped" else "Agent finished"
             } catch (t: Throwable) {
                 val ctx = started
                 val changed = ctx?.changed?.toList().orEmpty()
@@ -1929,6 +2060,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 AppState.vibeBusy = false
                 AppState.agentStop.set(false)
                 UiBridge.vibeUpdate()
+                Jobs.end(job, title, AppState.vibeResult)
             }
         }
     }
@@ -1948,6 +2080,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         saveEditor(announce = false)
         val app = applicationContext
         AppState.log("importing folder…")
+        val job = startJob("Importing folder", AppState.Tab.FILES)
         AppState.io.execute {
             try {
                 val dest = FolderImport.importTree(app, uri, AppState.reposDir, AppState::log)
@@ -1956,8 +2089,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 AppState.gitDetail = null
                 AppState.gitSnapshot = null
                 UiBridge.projectChanged()
+                Jobs.end(job, "Import finished", "${dest.name} is open in Files.")
             } catch (t: Throwable) {
-                AppState.log("open failed: ${t.message ?: t.javaClass.simpleName}")
+                val msg = t.message ?: t.javaClass.simpleName
+                AppState.log("open failed: $msg")
+                Jobs.end(job, "Import failed", msg)
             }
         }
     }
@@ -2010,11 +2146,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         onGit()
     }
 
-    private fun runGit(block: () -> String?) {
+    private fun runGit(label: String? = null, block: () -> String?) {
         if (AppState.gitBusy) return
         saveEditor(announce = false)
         AppState.gitBusy = true
         onGit()
+        val job = label?.let { startJob(it, AppState.Tab.GIT) }
         AppState.io.execute {
             DebugLog.step("git", "start")
             val msg = try {
@@ -2023,6 +2160,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 DebugLog.step("git", "fail ${t.javaClass.simpleName}: ${t.message}")
                 t.message ?: t.javaClass.simpleName
             }
+            if (job != null) Jobs.end(job, "$label finished", msg.orEmpty())
             if (!msg.isNullOrBlank()) {
                 DebugLog.step("git", "result ${msg.lineSequence().firstOrNull().orEmpty()}")
                 AppState.log(msg)
@@ -2211,7 +2349,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val actions = listOf<Pair<String, () -> Unit>>(
             "Stage all" to { runGit { AppState.gitDetail = null; GitOps.stageAll(AppState.cwd, AppState.reposDir) } },
             "Unstage all" to { runGit { AppState.gitDetail = null; GitOps.unstageAll(AppState.cwd, AppState.reposDir) } },
-            "Fetch" to { runGit { AppState.gitDetail = null; GitOps.fetch(AppState.cwd, AppState.reposDir) } },
+            "Fetch" to { runGit("Fetch") { AppState.gitDetail = null; GitOps.fetch(AppState.cwd, AppState.reposDir) } },
             "Checkout branch…" to { showBranches() },
             "Full log" to {
                 runGit {
