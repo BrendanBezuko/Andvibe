@@ -6,11 +6,15 @@ import android.os.Looper
 import java.io.File
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 object AppState {
     enum class Tab { CONSOLE, FILES, SEARCH, GIT, VIBE, BUILD }
 
     val io = Executors.newSingleThreadExecutor()
+    val agentIo = Executors.newSingleThreadExecutor()
+    val agentStop = AtomicBoolean(false)
+    val agentSteps = mutableListOf<String>()
     val history = ArrayDeque<Pair<String, String>>()
     val chat = mutableListOf<Pair<String, String>>()
 
@@ -52,6 +56,7 @@ object AppState {
         if (ready) return
         appContext = context.applicationContext
         WorkspaceStore.init(appContext)
+        ChatStore.init(appContext)
         reposDir = File(appContext.filesDir, "repos").apply { mkdirs() }
         cwd = ProjectStore.restore(appContext, reposDir) ?: reposDir
         log("AndVibe")

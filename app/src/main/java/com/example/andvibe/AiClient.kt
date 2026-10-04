@@ -173,7 +173,7 @@ object AiClient {
         }
     }
 
-    private fun tree(root: File, limit: Int = 200): String {
+    internal fun tree(root: File, limit: Int = 200): String {
         val lines = mutableListOf<String>()
         fun walkDir(dir: File, prefix: String) {
             if (lines.size >= limit) return
@@ -326,12 +326,12 @@ object AiClient {
 
     private data class Reply(val text: String, val input: Long, val output: Long)
 
-    private fun guessTokens(chars: Int): Long {
+    internal fun guessTokens(chars: Int): Long {
         if (chars <= 0) return 0
         return (chars / 4L).coerceAtLeast(1)
     }
 
-    private fun readUse(raw: String): Pair<Long, Long> {
+    internal fun readUse(raw: String): Pair<Long, Long> {
         return try {
             val json = JSONObject(raw)
             val usage = json.optJSONObject("usage")
@@ -357,7 +357,7 @@ object AiClient {
         }
     }
 
-    private fun extraHeaders(provider: Provider): Map<String, String> {
+    internal fun extraHeaders(provider: Provider): Map<String, String> {
         if (provider != Provider.OPENROUTER) return emptyMap()
         return mapOf("X-Title" to "AndVibe")
     }
@@ -578,12 +578,12 @@ object AiClient {
         else -> value?.toString().orEmpty()
     }
 
-    private fun chatUrl(base: String): String {
+    internal fun chatUrl(base: String): String {
         val trimmed = base.trim().trimEnd('/')
         return if (trimmed.endsWith("/chat/completions")) trimmed else "$trimmed/chat/completions"
     }
 
-    private fun responsesUrl(base: String): String {
+    internal fun responsesUrl(base: String): String {
         val trimmed = base.trim().trimEnd('/')
         return when {
             trimmed.endsWith("/responses") -> trimmed
@@ -592,7 +592,7 @@ object AiClient {
         }
     }
 
-    private fun anthropicUrl(base: String): String {
+    internal fun anthropicUrl(base: String): String {
         val trimmed = base.trim().trimEnd('/')
         return when {
             trimmed.endsWith("/v1/messages") -> trimmed
@@ -601,7 +601,7 @@ object AiClient {
         }
     }
 
-    private fun geminiUrl(base: String, model: String): String {
+    internal fun geminiUrl(base: String, model: String): String {
         val trimmed = base.trim().trimEnd('/')
         if (trimmed.contains(":generateContent")) return trimmed
         return "$trimmed/models/$model:generateContent"
@@ -705,7 +705,7 @@ object AiClient {
         return root + path
     }
 
-    private fun post(url: String, headers: Map<String, String>, body: String): String {
+    internal fun post(url: String, headers: Map<String, String>, body: String): String {
         return http("POST", url, headers, body, 180_000)
     }
 

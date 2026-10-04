@@ -64,7 +64,11 @@ Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a fi
 
 ## Vibe
 
-Pick OpenAI, Anthropic, Gemini, Grok, OpenRouter, Cursor, or Custom. The model and base URL start filled in and can be changed. API keys are in Settings. OpenRouter model ids include the vendor, like `anthropic/claude-sonnet-5`. Cursor uses a key from the Cursor dashboard. Each send starts a cloud agent with no repository and waits for its reply. The phone still applies the file changes.
+Pick OpenAI, Anthropic, Gemini, Grok, OpenRouter, Cursor, or Custom. The model and base URL start filled in and can be changed. API keys are in Settings. OpenRouter model ids include the vendor, like `anthropic/claude-sonnet-5`.
+
+Every provider except Cursor runs as an agent on the phone. The model calls tools, the phone runs them on the open repo, and the results go back to the model until it finishes, for at most 40 steps. The tools are list, read, grep, find-and-replace edit, write, delete, git status, git diff, the JavaScript checks and tests, and a Cloud Run build when the repo has `gradlew`. Each step shows in the chat. Send turns into Stop while the agent works; Stop takes effect after the current model call returns. If the repo has `AGENTS.md`, `CLAUDE.md`, or `.cursorrules`, the agent reads it first. The model needs tool calling.
+
+Cursor uses a key from the Cursor dashboard. Each send starts a cloud agent with no repository and waits for one reply with whole files, which the phone writes.
 
 | Provider | Default model | Base URL |
 | --- | --- | --- |

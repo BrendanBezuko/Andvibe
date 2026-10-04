@@ -1,6 +1,7 @@
 package com.example.andvibe
 
 import android.content.Intent
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -225,11 +226,32 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     override fun onVibe() {
         if (!AppState.vibeBusy && AppState.vibeResult.isNotEmpty()) {
+            val steps = synchronized(AppState.agentSteps) {
+                AppState.agentSteps.joinToString("\n").also { AppState.agentSteps.clear() }
+            }
+            if (steps.isNotBlank()) AppState.chat.add("steps" to steps)
             AppState.chat.add("assistant" to AppState.vibeResult)
             AppState.vibeResult = ""
+            ChatStore.save()
+            ChatStore.sync()
+            if (binding.vibePage.historyPane.visibility == View.VISIBLE) renderHistory()
         }
         renderChat()
-        binding.vibePage.vibeSend.isEnabled = !AppState.vibeBusy
+        val send = binding.vibePage.vibeSend
+        when {
+            !AppState.vibeBusy -> {
+                send.isEnabled = true
+                send.text = "Send"
+            }
+            AppState.agentStop.get() -> {
+                send.isEnabled = false
+                send.text = "Stopping…"
+            }
+            else -> {
+                send.isEnabled = currentProvider != Provider.CURSOR
+                send.text = "Stop"
+            }
+        }
         val paths = AppState.writtenPaths
         AppState.writtenPaths = emptyList()
         if (paths.isNotEmpty()) {
@@ -324,6 +346,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.usageTokens.text = (ws.inputTokens + ws.outputTokens).toString()
         binding.usagePrice.text = WorkspaceStore.priceText(ws.costMicros)
         if (boardOpen) binding.boardPage.boardScope.text = ws.name
+        if (ChatStore.sync()) {
+            renderChat()
+            renderHistory()
+        }
     }
 
     override fun onProject() {
@@ -553,7 +579,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             .setTitle(ws.name)
             .setMessage("Delete this workspace and its board.")
             .setPositiveButton("Delete") { _, _ ->
-                WorkspaceStore.delete(ws.id)
+                if (WorkspaceStore.delete(ws.id)) ChatStore.forget(ws.id)
                 renderWorkspace()
                 onUsage()
             }
@@ -1144,6 +1170,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.vibePage.autoTest.isChecked = store.autoTest()
         binding.vibePage.autoTest.setOnCheckedChangeListener { _, checked -> store.setAutoTest(checked) }
         binding.vibePage.vibeSend.setOnClickListener { sendVibe() }
+        binding.vibePage.newChat.setOnClickListener {
+            if (AppState.vibeBusy) return@setOnClickListener
+            ChatStore.startNew()
+            renderChat()
+            binding.vibePage.vibeTabs.getTabAt(0)?.select()
+        }
         binding.vibePage.vibePrompt.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) {
                 sendVibe()
@@ -1160,10 +1192,58 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun showVibeTab(index: Int) {
-        val model = index == 1
+        val model = index == 2
         if (!model) saveProvider(currentProvider)
-        binding.vibePage.chatPane.visibility = if (model) View.GONE else View.VISIBLE
+        binding.vibePage.chatPane.visibility = if (index == 0) View.VISIBLE else View.GONE
+        binding.vibePage.historyPane.visibility = if (index == 1) View.VISIBLE else View.GONE
         binding.vibePage.modelPane.visibility = if (model) View.VISIBLE else View.GONE
+        if (index == 1) renderHistory()
+    }
+
+    private fun renderHistory() {
+        val page = binding.vibePage
+        val list = page.historyList
+        list.removeAllViews()
+        val chats = ChatStore.chats()
+        page.historyEmpty.visibility = if (chats.isEmpty()) View.VISIBLE else View.GONE
+        page.newChat.isEnabled = !AppState.vibeBusy
+        val active = ChatStore.activeId()
+        val stamp = java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault())
+        for (chat in chats) {
+            val row = layoutInflater.inflate(R.layout.row_card, list, false)
+            val title = row.findViewById<TextView>(R.id.cardTitle)
+            title.text = chat.title
+            title.maxLines = 2
+            if (chat.id == active) title.setTextColor(getColor(R.color.accent))
+            val messages = chat.turns.count { it.first != "steps" }
+            row.findViewById<TextView>(R.id.cardBody).text =
+                "${stamp.format(java.util.Date(chat.updated))} · $messages messages"
+            row.setOnClickListener {
+                if (AppState.vibeBusy) {
+                    android.widget.Toast.makeText(
+                        this, "Wait for the current reply to finish", android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    return@setOnClickListener
+                }
+                ChatStore.open(chat.id)
+                renderChat()
+                page.vibeTabs.getTabAt(0)?.select()
+            }
+            row.setOnLongClickListener {
+                AlertDialog.Builder(this)
+                    .setTitle(chat.title)
+                    .setMessage("Delete this chat.")
+                    .setPositiveButton("Delete") { _, _ ->
+                        ChatStore.delete(chat.id)
+                        renderChat()
+                        renderHistory()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+                true
+            }
+            list.addView(row)
+        }
     }
 
     private fun renderChat() {
@@ -1173,18 +1253,30 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val working = AppState.vibeBusy
         binding.vibePage.chatEmpty.visibility = if (turns.isEmpty() && !working) View.VISIBLE else View.GONE
         for ((role, text) in turns) list.addView(chatBubble(role, text))
-        if (working) list.addView(chatBubble("assistant", "Working…"))
+        if (working) {
+            val steps = synchronized(AppState.agentSteps) { AppState.agentSteps.takeLast(12) }
+            if (steps.isNotEmpty()) list.addView(chatBubble("steps", steps.joinToString("\n")))
+            list.addView(chatBubble("assistant", "Working…"))
+        }
         binding.vibePage.chatScroll.post { binding.vibePage.chatScroll.fullScroll(View.FOCUS_DOWN) }
     }
 
     private fun chatBubble(role: String, text: String): View {
         val user = role == "user"
+        val steps = role == "steps"
         val bubble = TextView(this).apply {
             this.text = text
-            setTextColor(getColor(R.color.ink))
-            textSize = 15f
-            setBackgroundResource(R.drawable.bg_card)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            if (steps) {
+                setTextColor(getColor(R.color.muted))
+                textSize = 12f
+                typeface = Typeface.MONOSPACE
+                setPadding(dp(4), dp(4), dp(4), dp(4))
+            } else {
+                setTextColor(getColor(R.color.ink))
+                textSize = 15f
+                setBackgroundResource(R.drawable.bg_card)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }
         }
         val params = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -1597,11 +1689,17 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
             .orEmpty()
         displayed = files
-        binding.filesPage.fileList.adapter = ArrayAdapter(
-            this,
-            R.layout.row_file,
-            files.map { if (it.isDirectory) it.name + "/" else it.name }
-        )
+        val iconPx = (16 * resources.displayMetrics.density).toInt()
+        binding.filesPage.fileList.adapter = object : ArrayAdapter<File>(this, R.layout.row_file_entry, files) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                val row = (convertView ?: layoutInflater.inflate(R.layout.row_file_entry, parent, false))
+                    as android.widget.TextView
+                val file = files[position]
+                row.text = file.name
+                row.setCompoundDrawablesRelative(FileIcons.forFile(file, iconPx), null, null, null)
+                return row
+            }
+        }
         binding.filesPage.filesEmpty.text = AppState.downloadNote ?: if (cwd.canonicalPath == repos.canonicalPath) {
             "Find a repo on Search, or tap Open for a folder already on this phone."
         } else {
@@ -1709,13 +1807,18 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun sendVibe() {
-        if (AppState.vibeBusy) return
+        if (AppState.vibeBusy) {
+            AppState.agentStop.set(true)
+            UiBridge.vibeUpdate()
+            return
+        }
         val instruction = binding.vibePage.vibePrompt.text?.toString()?.trim().orEmpty()
         if (instruction.isEmpty()) return
         saveEditor(announce = false)
         saveProvider(currentProvider)
         binding.vibePage.vibePrompt.setText("")
         AppState.chat.add("user" to instruction)
+        ChatStore.save()
         val provider = currentProvider
         val key = store.get(provider, "key", "")
         val model = binding.vibePage.model.text?.toString()?.trim().orEmpty()
@@ -1726,7 +1829,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.vibeBusy = true
         AppState.vibeResult = ""
         AppState.writtenPaths = emptyList()
+        AppState.agentStop.set(false)
+        synchronized(AppState.agentSteps) { AppState.agentSteps.clear() }
         UiBridge.vibeUpdate()
+        if (provider != Provider.CURSOR) {
+            runAgent(instruction, provider, key, model, base, open, cwd)
+            return
+        }
         AppState.io.execute {
             DebugLog.step("vibe", "start provider=${provider.id} chars=${instruction.length}")
             try {
@@ -1763,6 +1872,83 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 AppState.log("vibe error: $msg")
             }             finally {
                 AppState.vibeBusy = false
+                UiBridge.vibeUpdate()
+            }
+        }
+    }
+
+    private fun runAgent(
+        instruction: String,
+        provider: Provider,
+        key: String,
+        model: String,
+        base: String,
+        open: File?,
+        cwd: File
+    ) {
+        val appContext = applicationContext
+        val buildUrl = store.buildUrl()
+        val buildToken = store.buildToken()
+        val earlier = AppState.history.toList()
+        AppState.agentIo.execute {
+            DebugLog.step("agent", "start provider=${provider.id} model=$model chars=${instruction.length}")
+            var started: AgentContext? = null
+            try {
+                val root = AppState.projectRoot()
+                val ctx = AgentContext(root, AppState.reposDir, appContext, buildUrl, buildToken)
+                started = ctx
+                val job = AgentJob(
+                    ctx, cwd, open, instruction, provider, key, model, base, earlier, AppState.agentStop
+                )
+                val result = Agent.run(job) { line ->
+                    synchronized(AppState.agentSteps) {
+                        AppState.agentSteps.add(line)
+                        if (AppState.agentSteps.size > 300) AppState.agentSteps.removeAt(0)
+                    }
+                    DebugLog.step("agent", line)
+                    UiBridge.vibeUpdate()
+                }
+                val report = buildString {
+                    append(result.text)
+                    if (result.changed.isNotEmpty()) {
+                        append("\n\nChanged:")
+                        result.changed.forEach { file ->
+                            append("\n").append(RepoFiles.rel(file, root))
+                            if (!file.exists()) append(" (deleted)")
+                        }
+                    }
+                }
+                AppState.history.addLast("user" to instruction.take(2000))
+                AppState.history.addLast("assistant" to report.take(2000))
+                while (AppState.history.size > 8) AppState.history.removeFirst()
+                if (result.changed.isNotEmpty() && !AppState.gitBusy) {
+                    AppState.gitSnapshot = runCatching {
+                        GitOps.snapshot(AppState.cwd, AppState.reposDir)
+                    }.getOrNull()
+                    UiBridge.gitUpdate()
+                }
+                AppState.writtenPaths = result.changed.filter { it.isFile }.map { it.canonicalPath }
+                AppState.vibeResult = report
+                DebugLog.step("agent", "done steps=${result.steps} files=${result.changed.size}")
+                AppState.log(report)
+            } catch (t: Throwable) {
+                val ctx = started
+                val changed = ctx?.changed?.toList().orEmpty()
+                val msg = buildString {
+                    append(t.message ?: t.javaClass.simpleName)
+                    if (ctx != null && changed.isNotEmpty()) {
+                        append("\n\nChanged before the error:")
+                        changed.forEach { append("\n").append(RepoFiles.rel(it, ctx.root)) }
+                    }
+                }
+                AppState.vibeResult = msg
+                AppState.writtenPaths = changed.filter { it.isFile }.map { it.canonicalPath }
+                if (changed.isNotEmpty()) UiBridge.gitUpdate()
+                DebugLog.step("agent", "fail ${t.javaClass.simpleName}: $msg")
+                AppState.log("agent error: $msg")
+            } finally {
+                AppState.vibeBusy = false
+                AppState.agentStop.set(false)
                 UiBridge.vibeUpdate()
             }
         }
