@@ -14,6 +14,7 @@ during the Gradle run, so the zip should be source plus the wrapper.
 """
 
 import hashlib
+import importlib
 import io
 import json
 import os
@@ -48,6 +49,9 @@ VT_API = "https://www.virustotal.com/api/v3"
 # The free tier allows 4 requests a minute.
 VT_POLL = 20
 VT_DIRECT_MAX = 32 * 1024 * 1024
+# A module with check(header, task) that returns None to allow the build,
+# or (status, text) to refuse it. Asked only when BUILD_TOKEN does not match.
+AUTH_PLUGIN = importlib.import_module(os.environ["AUTH_PLUGIN"]) if os.environ.get("AUTH_PLUGIN") else None
 
 
 def authorized(header: str) -> bool:
@@ -207,14 +211,18 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path != "/build":
             self._send(404, b"not found\n", "text/plain")
             return
-        if not authorized(self.headers.get("Authorization", "")):
-            self._send(401, b"unauthorized\n", "text/plain")
-            return
         try:
             task = safe_task(parse_qs(parsed.query).get("task", ["assembleDebug"])[0])
         except ValueError as exc:
             self._send(400, (str(exc) + "\n").encode(), "text/plain")
             return
+        header = self.headers.get("Authorization", "")
+        if not authorized(header):
+            denied = AUTH_PLUGIN.check(header, task) if AUTH_PLUGIN else (401, "unauthorized")
+            if denied:
+                code, text = denied
+                self._send(code, (text + "\n").encode("utf-8"), "text/plain")
+                return
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -450,7 +458,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    if not TOKEN:
+    if AUTH_PLUGIN:
+        print(f"auth plugin {AUTH_PLUGIN.__name__}", flush=True)
+    elif not TOKEN:
         print("BUILD_TOKEN is empty. /build will reject every request.", flush=True)
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"listening on {PORT}", flush=True)

@@ -275,7 +275,7 @@ object DebugMcp {
         val note = buildString {
             append("saved ${file.absolutePath}\n")
             append("size ${bitmap.width}x${bitmap.height}, ${bytes.size} bytes\n")
-            append("adb pull ${file.absolutePath} web/src/assets/screens/${file.name}")
+            append("adb pull ${file.absolutePath} ../Andvibe-subscription/web/src/assets/screens/${file.name}")
         }
         val image = JSONObject()
             .put("type", "image")

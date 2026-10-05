@@ -129,7 +129,10 @@ object CloudBuild {
             }
             val code = conn.responseCode
             DebugLog.step("cloud.http", "status=$code ${System.currentTimeMillis() - started}ms")
-            if (code == 401) error("Cloud Run rejected the token")
+            if (code == 401) {
+                val err = readLimited(conn.errorStream).trim()
+                error(if (err.isBlank()) "Cloud Run rejected the token" else "Cloud Run rejected the token: $err")
+            }
             if (code !in 200..299) {
                 val err = readLimited(conn.errorStream)
                 error(if (err.isBlank()) "HTTP $code" else "HTTP $code\n$err")

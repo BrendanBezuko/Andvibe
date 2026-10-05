@@ -30,7 +30,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Icons
 
-`scripts/make_icons.py` makes every icon from `Neon Android &vibe Logo.png`: the launcher mipmaps, the website favicon, touch icons, manifest, and social image, and the Play icon and feature graphic in `store/`. Run it again after the logo changes.
+`scripts/make_icons.py` makes every icon from `Neon Android &vibe Logo.png`: the launcher mipmaps, the website favicon, touch icons, manifest, and social image, and the Play icon and feature graphic in `store/`. Run it again after the logo changes. The website is not in this repo. The script writes its icons to `../Andvibe-subscription/web/public`, or to `$ANDVIBE_WEB/public` when that is set, and skips them when the folder is missing.
 
 ```bash
 python3 -m pip install pillow
@@ -103,6 +103,10 @@ On Console, type what you want and tap **Find**. AndVibe searches public reposit
 A project without `gradlew` is packed on the phone. **Build APK** syntax-checks and tests the JavaScript, then writes a signed APK named Built app. The path is on the Build tab, under `Android/data/com.example.andvibe/files/apk/`. The first install asks you to allow AndVibe to install unknown apps. Tap **Install** again after that.
 
 Gradle, Java, Kotlin, Python, Rust, and Go are not compiled on the phone.
+
+## Hosted builds with Pro
+
+Skip the Cloud Run setup below with AndVibe Pro. Sign in at [andvibe.org/account](https://andvibe.org/account/), subscribe, and create a build key. On the Build tab, paste the hosted builder URL shown on that page and the build key as the token. Pro allows 6 builds an hour, 15 a day, and 100 in 30 days, each up to 20 minutes.
 
 ## Deploy the Cloud Run builder
 
@@ -203,6 +207,7 @@ Optional environment variables, comma-separated in `--set-env-vars`:
 | `BUILD_TIMEOUT` | `3000` | Seconds for one Gradle run. |
 | `VT_API_KEY` | empty | VirusTotal API key. When set, each APK is scanned before it is sent and the verdict shows in the Build tab. Empty skips the scan. |
 | `VT_TIMEOUT` | `240` | Seconds to wait for VirusTotal results. After that the APK is sent with a link to the report. |
+| `AUTH_PLUGIN` | empty | Python module name. When a request's bearer token is not `BUILD_TOKEN`, the server calls the module's `check(header, task)`. `None` allows the build. A `(status, text)` tuple refuses it. |
 
 To turn on the VirusTotal scan, add the key without touching `BUILD_TOKEN`. `--set-env-vars` replaces every variable, so use `--update-env-vars`:
 
@@ -277,7 +282,7 @@ adb forward --list
 
 You want a line like `host-tcp:8765 tcp:8765`. Open AndVibe on the emulator or phone. In the app, Console → Settings should say **Listening on 127.0.0.1:8765**. If it says the port is in use, run the `adb reverse --remove` line above and tap **Try again**.
 
-Then in Cursor, open Settings → MCP (or the command palette, search for MCP) and reload the **andvibe** server. A green dot means Cursor reached the phone. The tools are `logs`, `build_log`, `console_log`, `state`, and `screenshot`. `logs` can be filtered by area, such as `cloud`, `cloud.zip`, or `cloud.http`. `screenshot` can switch to a tab first (`tab: "vibe"`), returns the PNG, and saves it under `/sdcard/Android/data/com.example.andvibe/files/screenshots/` on the device. The result includes the `adb pull` line that copies it into `web/src/assets/screens/`. AndVibe has to be open on screen. A request time on the Settings screen means something connected.
+Then in Cursor, open Settings → MCP (or the command palette, search for MCP) and reload the **andvibe** server. A green dot means Cursor reached the phone. The tools are `logs`, `build_log`, `console_log`, `state`, and `screenshot`. `logs` can be filtered by area, such as `cloud`, `cloud.zip`, or `cloud.http`. `screenshot` can switch to a tab first (`tab: "vibe"`), returns the PNG, and saves it under `/sdcard/Android/data/com.example.andvibe/files/screenshots/` on the device. The result includes the `adb pull` line that copies it into the website's `web/src/assets/screens/`, in the `Andvibe-subscription` repo next to this one. AndVibe has to be open on screen. A request time on the Settings screen means something connected.
 
 `adb forward` has to be set again after the device disconnects. If an emulator is not the only device attached, pass `-s emulator-5554` (or whichever serial `adb devices` shows) on the forward commands.
 

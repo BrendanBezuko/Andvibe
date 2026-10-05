@@ -48,6 +48,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private const val PRO_ACCOUNT_URL = "https://andvibe.org/account/"
+
 class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private lateinit var binding: ActivityMainBinding
     private lateinit var store: SecretStore
@@ -945,6 +947,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             vaultField(secrets, "${provider.id}_key", "${provider.label} API key", secret = true)
         }
         vaultField(secrets, "build_token", "Build token", secret = true)
+        vaultLink(secrets, "No Cloud Run of your own? Get a Pro build key at andvibe.org/account", PRO_ACCOUNT_URL)
         vaultField(secrets, "git_token", "Git HTTPS token", secret = true)
         vaultField(secrets, "git_ssh", "SSH private key", secret = true, lines = 4)
 
@@ -966,6 +969,18 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             this.text = text
             setTextColor(getColor(R.color.muted))
             textSize = 13f
+        })
+    }
+
+    private fun vaultLink(parent: LinearLayout, text: String, url: String) {
+        parent.addView(TextView(this).apply {
+            this.text = text
+            setTextColor(getColor(R.color.accent))
+            textSize = 13f
+            setPadding(0, dp(6), 0, dp(2))
+            setOnClickListener {
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            }
         })
     }
 
