@@ -78,8 +78,10 @@ dependencies {
     implementation(libs.spongycastle.core)
     implementation(libs.spongycastle.prov)
     implementation(libs.spongycastle.pkix)
+    implementation(libs.kotlinx.coroutines.android)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
 }

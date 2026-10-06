@@ -1,4 +1,4 @@
-package com.example.andvibe
+package com.example.andvibe.core
 
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream

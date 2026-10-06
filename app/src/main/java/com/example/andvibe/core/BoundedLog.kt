@@ -1,4 +1,4 @@
-package com.example.andvibe
+package com.example.andvibe.core
 
 /**
  * Append-only text log that trims itself from the front: once it grows past

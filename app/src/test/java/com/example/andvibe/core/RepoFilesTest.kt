@@ -1,4 +1,4 @@
-package com.example.andvibe
+package com.example.andvibe.core
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

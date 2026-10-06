@@ -1,5 +1,9 @@
 package com.example.andvibe
 
+import com.example.andvibe.core.JsRunner
+import com.example.andvibe.core.RepoFiles
+import com.example.andvibe.core.ZipWriter
+
 import android.content.Context
 import com.android.apksig.ApkSigner
 import org.spongycastle.asn1.x500.X500Name

@@ -1,5 +1,10 @@
 package com.example.andvibe
 
+import com.example.andvibe.core.GitClient
+import com.example.andvibe.core.GitOps
+import com.example.andvibe.core.JsRunner
+import com.example.andvibe.core.RepoFiles
+
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -136,12 +141,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        AppState.init(this)
-        store = SecretStore(this)
-        GitOps.authorName = store.gitName().ifBlank { "AndVibe" }
-        GitOps.authorEmail = store.gitEmail().ifBlank { "andvibe@local" }
-        GitOps.remoteUser = store.gitUser()
-        GitOps.remoteToken = store.gitToken()
+        store = (application as AndVibeApp).graph.secrets
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         UiBridge.listener = this
@@ -1283,7 +1283,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val ssh = vaultText("git_ssh")
         store.saveBuild(store.buildUrl(), token)
         store.saveGit(store.gitName(), store.gitEmail(), store.gitUser(), gitToken, ssh)
-        GitOps.remoteToken = gitToken
         binding.settingsPage.gitHttpsToken.setText(gitToken)
         binding.settingsPage.gitSsh.setText(ssh)
         AppState.log("saved secrets")
@@ -1307,9 +1306,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val origin = vaultText("git_origin")
         store.saveBuild(url, store.buildToken())
         store.saveGit(name, email, user, store.gitToken(), store.gitSsh())
-        GitOps.authorName = name.ifBlank { "AndVibe" }
-        GitOps.authorEmail = email.ifBlank { "andvibe@local" }
-        GitOps.remoteUser = user
         binding.vibePage.model.setText(vaultText("${selected.id}_model"))
         binding.vibePage.baseUrl.setText(vaultText("${selected.id}_base"))
         binding.settingsPage.gitName.setText(name)
@@ -3044,10 +3040,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun loadGitSettings() {
         val page = binding.settingsPage
-        page.gitName.setText(GitOps.authorName)
-        page.gitEmail.setText(GitOps.authorEmail)
-        page.gitHttpsUser.setText(GitOps.remoteUser)
-        page.gitHttpsToken.setText(GitOps.remoteToken)
+        page.gitName.setText(store.gitName().ifBlank { "AndVibe" })
+        page.gitEmail.setText(store.gitEmail().ifBlank { "andvibe@local" })
+        page.gitHttpsUser.setText(store.gitUser())
+        page.gitHttpsToken.setText(store.gitToken())
         page.gitSsh.setText(store.gitSsh())
         page.gitOrigin.setText(
             runCatching { GitOps.originUrl(AppState.cwd, AppState.reposDir) }.getOrDefault("")
@@ -3057,12 +3053,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun saveGitSettings() {
         val page = binding.settingsPage
-        GitOps.authorName = page.gitName.text?.toString()?.trim().orEmpty().ifBlank { "AndVibe" }
-        GitOps.authorEmail = page.gitEmail.text?.toString()?.trim().orEmpty().ifBlank { "andvibe@local" }
-        GitOps.remoteUser = page.gitHttpsUser.text?.toString()?.trim().orEmpty()
-        GitOps.remoteToken = page.gitHttpsToken.text?.toString().orEmpty()
+        val name = page.gitName.text?.toString()?.trim().orEmpty().ifBlank { "AndVibe" }
+        val email = page.gitEmail.text?.toString()?.trim().orEmpty().ifBlank { "andvibe@local" }
+        val user = page.gitHttpsUser.text?.toString()?.trim().orEmpty()
+        val token = page.gitHttpsToken.text?.toString().orEmpty()
         val ssh = page.gitSsh.text?.toString().orEmpty()
-        store.saveGit(GitOps.authorName, GitOps.authorEmail, GitOps.remoteUser, GitOps.remoteToken, ssh)
+        store.saveGit(name, email, user, token, ssh)
         val origin = page.gitOrigin.text?.toString()?.trim().orEmpty()
         val note = if (origin.isEmpty()) {
             "Saved the account."

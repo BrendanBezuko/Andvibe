@@ -1,4 +1,4 @@
-package com.example.andvibe
+package com.example.andvibe.core
 
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.ResetCommand.ResetType
@@ -19,10 +19,11 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 object GitOps {
-    var authorName = "AndVibe"
-    var authorEmail = "andvibe@local"
-    var remoteUser = ""
-    var remoteToken = ""
+    class Auth(val name: String, val email: String, val user: String, val token: String)
+
+    /** Injected by AppGraph; resolved per call so Settings edits apply immediately. */
+    @Volatile
+    var auth: () -> Auth = { Auth("AndVibe", "andvibe@local", "", "") }
 
     data class Change(
         val path: String,
@@ -164,7 +165,7 @@ object GitOps {
                     .setName(tag)
                     .setAnnotated(true)
                     .setMessage(note)
-                    .setTagger(PersonIdent(authorName, authorEmail))
+                    .setTagger(auth().let { PersonIdent(it.name, it.email) })
                     .call()
             }
             "tagged $tag"
@@ -440,7 +441,7 @@ object GitOps {
     }
 
     fun push(start: File, repos: File): String {
-        if (remoteToken.isBlank()) {
+        if (auth().token.isBlank()) {
             return "Add an HTTPS token in Settings. GitHub wants a personal access token."
         }
         return network(start, repos, "push") { git ->
@@ -631,8 +632,9 @@ object GitOps {
     }
 
     private fun author(git: Git): Pair<String, String> {
-        val name = authorName.ifBlank { "AndVibe" }
-        val email = authorEmail.ifBlank { "andvibe@local" }
+        val a = auth()
+        val name = a.name.ifBlank { "AndVibe" }
+        val email = a.email.ifBlank { "andvibe@local" }
         val config = git.repository.config
         config.setString("user", null, "name", name)
         config.setString("user", null, "email", email)
@@ -677,9 +679,9 @@ object GitOps {
     }
 
     private fun credentials(): UsernamePasswordCredentialsProvider? {
-        val token = remoteToken
-        if (token.isBlank()) return null
-        return UsernamePasswordCredentialsProvider(remoteUser.ifBlank { "git" }, token)
+        val a = auth()
+        if (a.token.isBlank()) return null
+        return UsernamePasswordCredentialsProvider(a.user.ifBlank { "git" }, a.token)
     }
 
     private fun prepare() {

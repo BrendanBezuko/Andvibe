@@ -1,5 +1,9 @@
 package com.example.andvibe
 
+import com.example.andvibe.core.BoundedLog
+import com.example.andvibe.core.GitOps
+import com.example.andvibe.core.RepoFiles
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Handler
@@ -23,9 +27,14 @@ object AppState {
     val chat = mutableListOf<Pair<String, String>>()
 
     lateinit var appContext: Context
-    lateinit var reposDir: File
-    @Volatile var cwd: File = File(".")
-    @Volatile var openFile: File? = null
+    lateinit var session: ProjectSession
+    val reposDir: File get() = session.reposDir
+    var cwd: File
+        get() = session.cwd
+        set(value) { session.cwd = value }
+    var openFile: File?
+        get() = session.openFile
+        set(value) { session.openFile = value }
     var tab = Tab.CONSOLE
     var warnedPlain = false
     @Volatile var vibeBusy = false
@@ -64,15 +73,12 @@ object AppState {
 
     fun isReady(): Boolean = ready
 
-    fun init(context: Context) {
+    fun init(context: Context, projectSession: ProjectSession) {
         if (ready) return
         appContext = context.applicationContext
-        WorkspaceStore.init(appContext)
-        ChatStore.init(appContext)
-        PromptStore.init(appContext)
-        reposDir = File(appContext.filesDir, "repos").apply { mkdirs() }
+        session = projectSession
         WorkspaceStore.migrate()
-        cwd = ProjectStore.restore(appContext, reposDir)?.takeIf { WorkspaceStore.contains(it) } ?: reposDir
+        session.restoreLastProject()
         log("AndVibe")
         log("Type help")
         if (cwd.canonicalFile == reposDir.canonicalFile) {

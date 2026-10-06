@@ -1,5 +1,10 @@
 package com.example.andvibe
 
+import com.example.andvibe.core.GitClient
+import com.example.andvibe.core.GitOps
+import com.example.andvibe.core.JsRunner
+import com.example.andvibe.core.RepoFiles
+
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject

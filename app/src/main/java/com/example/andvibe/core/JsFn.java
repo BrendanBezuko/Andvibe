@@ -1,6 +1,4 @@
-package com.example.andvibe;
-
-import androidx.annotation.Nullable;
+package com.example.andvibe.core;
 
 import org.mozilla.javascript.BaseFunction;
 import org.mozilla.javascript.Context;
@@ -13,6 +11,5 @@ abstract class JsFn extends BaseFunction {
         return invoke(args);
     }
 
-    @Nullable
-    protected abstract Object invoke(@Nullable Object[] args);
+    protected abstract Object invoke(Object[] args);
 }

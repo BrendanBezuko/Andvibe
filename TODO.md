@@ -16,7 +16,7 @@
 
 ## Now — architecture rebuild (`DESIGN.md`)
 - [x] Phase 0: extract pure core (`ZipWriter`, `BoundedLog`) + 27 JVM tests
-- [ ] Phase 1: `AppGraph` + `ProjectSession`; `SecretStore` app-scoped; kill `GitOps` globals
+- [x] Phase 1: `AppGraph` + `ProjectSession`; `SecretStore` app-scoped; kill `GitOps` globals
 - [ ] Phase 2: `TaskRunner` (coroutines, cancellation, resource locks, busy derived)
 - [ ] Phase 3: `AgentRuntime` (event stream, `ToolRegistry`) + shared `BuildService`
 - [ ] Phase 4: per-tab features (Search → Understand → Build → Console → Git → Vibe → rest);

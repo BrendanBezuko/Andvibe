@@ -1,4 +1,4 @@
-package com.example.andvibe
+package com.example.andvibe.core
 
 import java.io.BufferedInputStream
 import java.io.File

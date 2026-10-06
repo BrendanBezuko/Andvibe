@@ -1,4 +1,4 @@
-package com.example.andvibe
+package com.example.andvibe.core
 
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.ContextFactory
