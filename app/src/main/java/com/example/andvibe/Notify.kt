@@ -13,6 +13,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
+import com.example.andvibe.tasks.TaskRunner
 import java.io.File
 
 object Notify {
@@ -44,7 +45,7 @@ object Notify {
         return NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
 
-    fun working(context: Context, jobs: List<Jobs.Job>): Notification {
+    fun working(context: Context, jobs: List<TaskRunner.Task>): Notification {
         val first = jobs.firstOrNull()
         val title = when {
             first == null -> "Finishing up"
@@ -73,7 +74,7 @@ object Notify {
             .build()
     }
 
-    fun done(context: Context, job: Jobs.Job, title: String, text: String, apk: File?) {
+    fun done(context: Context, job: TaskRunner.Task, title: String, text: String, apk: File?) {
         val body = text.trim().ifBlank { job.label }.take(800)
         val requestCode = 1000 + job.id
         val builder = NotificationCompat.Builder(context, DONE)

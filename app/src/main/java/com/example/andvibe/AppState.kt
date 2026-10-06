@@ -1,6 +1,8 @@
 package com.example.andvibe
 
 import com.example.andvibe.core.BoundedLog
+import com.example.andvibe.tasks.Res
+import com.example.andvibe.tasks.TaskRunner
 import com.example.andvibe.core.GitOps
 import com.example.andvibe.core.RepoFiles
 
@@ -11,7 +13,6 @@ import android.os.Looper
 import java.io.File
 import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -19,8 +20,6 @@ import java.util.concurrent.atomic.AtomicReference
 object AppState {
     enum class Tab { CONSOLE, BOARD, FILES, SEARCH, GIT, VIBE, UNDERSTAND, BUILD }
 
-    val io = Executors.newSingleThreadExecutor()
-    val agentIo = Executors.newSingleThreadExecutor()
     val agentStop = AtomicBoolean(false)
     val agentSteps = mutableListOf<String>()
     val history = ArrayDeque<Pair<String, String>>()
@@ -37,32 +36,35 @@ object AppState {
         set(value) { session.openFile = value }
     var tab = Tab.CONSOLE
     var warnedPlain = false
-    @Volatile var vibeBusy = false
+
+    lateinit var tasks: TaskRunner
+
+    val vibeBusy: Boolean get() = tasks.holds(Res.AGENT)
     @Volatile var vibeRepo: File? = null
     var vibeResult = ""
     var writtenPaths: List<String> = emptyList()
-    @Volatile var understandBusy = false
+    val understandBusy: Boolean get() = tasks.holds(Res.UNDERSTAND)
     @Volatile var understandRepo: File? = null
     val understandStop = AtomicBoolean(false)
     var understandText = ""
     var understandNote = ""
-    @Volatile var feedBusy = false
-    @Volatile var findBusy = false
+    val feedBusy: Boolean get() = tasks.holds(Res.FEED)
+    val findBusy: Boolean get() = tasks.holds(Res.FIND)
     var findHits: List<FossSearch.RepoHit> = emptyList()
     var findNews: List<FossSearch.NewsHit> = emptyList()
     var findBrief: String = ""
     var findNewsTab = false
     var findNote: String = ""
-    @Volatile var downloadBusy = false
+    val downloadBusy: Boolean get() = tasks.holds(Res.DOWNLOAD)
     @Volatile var downloadNote: String? = null
-    @Volatile var importBusy = false
-    @Volatile var consoleBusy = false
+    val importBusy: Boolean get() = tasks.holds(Res.IMPORT)
+    val consoleBusy: Boolean get() = tasks.holds(Res.CONSOLE)
 
-    @Volatile var buildBusy = false
-    @Volatile var reviseBusy = false
+    val buildBusy: Boolean get() = tasks.holds(Res.BUILD)
+    val reviseBusy: Boolean get() = tasks.holds(Res.REVISE)
     var lastApk: String? = null
 
-    @Volatile var gitBusy = false
+    val gitBusy: Boolean get() = tasks.holds(Res.GIT)
     var gitSnapshot: GitOps.Snapshot? = null
     var gitDetail: String? = null
     var gitMessageClear = false
@@ -98,26 +100,14 @@ object AppState {
 
     fun workBusy(): Boolean = vibeBusy || buildBusy || reviseBusy || understandBusy
 
-    fun anyBusy(): Boolean =
-        vibeBusy || buildBusy || reviseBusy || understandBusy ||
-            gitBusy || findBusy || downloadBusy || importBusy || consoleBusy || feedBusy ||
-            Jobs.active().isNotEmpty()
+    fun anyBusy(): Boolean = tasks.anyActive()
 
     fun busyLabel(): String? {
-        Jobs.active().lastOrNull()?.let { return "${it.label}…" }
-        return when {
-            vibeBusy -> "Agent working…"
-            buildBusy -> "Building…"
-            reviseBusy -> "Revising…"
-            understandBusy -> "Understanding…"
-            gitBusy -> "Git working…"
-            downloadBusy -> downloadNote ?: "Downloading…"
-            importBusy -> "Importing…"
-            findBusy -> "Searching…"
-            consoleBusy -> "Running command…"
-            feedBusy -> "Refreshing feed…"
-            else -> null
+        val task = tasks.newest() ?: return null
+        if (Res.DOWNLOAD in task.holds || Res.IMPORT in task.holds) {
+            downloadNote?.let { return it }
         }
+        return "${task.label}…"
     }
 
     fun fitWorkspace(toRoot: Boolean = false): Boolean {

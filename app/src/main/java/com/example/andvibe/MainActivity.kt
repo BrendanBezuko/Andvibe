@@ -1,6 +1,11 @@
 package com.example.andvibe
 
 import com.example.andvibe.core.GitClient
+import com.example.andvibe.tasks.Res
+import com.example.andvibe.tasks.Resource
+import com.example.andvibe.tasks.TaskRunner
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.launch
 import com.example.andvibe.core.GitOps
 import com.example.andvibe.core.JsRunner
 import com.example.andvibe.core.RepoFiles
@@ -178,12 +183,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     override fun onStart() {
         super.onStart()
-        Jobs.visible = true
+        graph.tasks.visible = true
+        graph.tasks.resync()
         if (settingsOpen) renderBackground()
     }
 
     override fun onStop() {
-        Jobs.visible = false
+        graph.tasks.visible = false
         super.onStop()
     }
 
@@ -582,13 +588,24 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         syncBack()
     }
 
-    private fun startJob(label: String, tab: AppState.Tab): Jobs.Job {
-        val prefs = getSharedPreferences("andvibe_background", MODE_PRIVATE)
-        if (!prefs.getBoolean("asked", false)) {
-            prefs.edit().putBoolean("asked", true).apply()
-            requestBackground()
+    private val graph get() = (application as AndVibeApp).graph
+
+    private fun launchTask(
+        label: String,
+        tab: AppState.Tab,
+        holds: Set<Resource>,
+        track: Boolean = true,
+        lane: CoroutineDispatcher? = null,
+        block: suspend () -> TaskRunner.Done?,
+    ): TaskRunner.Task? {
+        if (track) {
+            val prefs = getSharedPreferences("andvibe_background", MODE_PRIVATE)
+            if (!prefs.getBoolean("asked", false)) {
+                prefs.edit().putBoolean("asked", true).apply()
+                requestBackground()
+            }
         }
-        return Jobs.begin(this, label, tab)
+        return graph.tasks.launch(label, tab, holds, lane ?: graph.dispatchers.repo, track, block)
     }
 
     private fun requestBackground() {
@@ -1141,22 +1158,19 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun ensureFossFeed() {
         if (!FossFeed.stale(this) || AppState.feedBusy) return
-        AppState.feedBusy = true
-        UiBridge.busyUpdate()
         if (AppState.findBrief.isBlank()) {
             AppState.findNote = "Refreshing the daily FOSS cache…"
             if (AppState.tab == AppState.Tab.SEARCH) renderFind()
         }
-        AppState.io.execute {
+        launchTask("Refreshing feed", AppState.Tab.SEARCH, setOf(Res.FEED), track = false) {
             val note = runCatching { FossFeed.refresh(applicationContext) }.getOrElse {
                 it.message ?: "cache failed"
             }
-            AppState.feedBusy = false
             if (AppState.findBrief.isBlank()) AppState.findNote = note
-            UiBridge.busyUpdate()
             runOnUiThread {
                 if (!isFinishing && AppState.tab == AppState.Tab.SEARCH) renderFind()
             }
+            null
         }
     }
 
@@ -1312,7 +1326,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.settingsPage.gitEmail.setText(email)
         binding.settingsPage.gitHttpsUser.setText(user)
         binding.settingsPage.gitOrigin.setText(origin)
-        AppState.io.execute {
+        graph.scope.launch(graph.dispatchers.repo) {
             val current = runCatching { GitOps.originUrl(AppState.cwd, AppState.reposDir) }.getOrDefault("")
             val message = if (origin == current) {
                 "saved variables"
@@ -1335,22 +1349,18 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.log("$ $line")
         val parts = Console.tokenize(line)
         val slow = parts.getOrNull(0) == "git" && parts.getOrNull(1) in setOf("clone", "push", "pull", "fetch")
-        val job = if (slow) startJob(parts.take(2).joinToString(" "), AppState.Tab.CONSOLE) else null
-        AppState.consoleBusy = true
-        paintBusy()
-        AppState.io.execute {
+        val label = if (slow) parts.take(2).joinToString(" ") else "Running command"
+        launchTask(label, AppState.Tab.CONSOLE, setOf(Res.CONSOLE), track = slow) {
             try {
                 Console.run(line)
-                if (job != null) Jobs.end(job, "${job.label} finished", line)
+                if (slow) TaskRunner.Done("$label finished", line) else null
             } catch (t: Throwable) {
                 val msg = t.message ?: t.javaClass.simpleName
                 AppState.log("error: $msg")
-                if (job != null) Jobs.end(job, "${job.label} failed", msg)
-            } finally {
-                AppState.consoleBusy = false
-                UiBridge.busyUpdate()
+                if (slow) TaskRunner.Done("$label failed", msg) else null
             }
         }
+        paintBusy()
     }
 
     private fun findRepos() {
@@ -1368,15 +1378,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val key = store.get(provider, "key", "")
         val model = store.get(provider, "model", provider.defaultModel)
         val base = store.get(provider, "base", provider.defaultBase)
-        AppState.findBusy = true
         AppState.findHits = emptyList()
         AppState.findNews = emptyList()
         AppState.findBrief = ""
         AppState.findNote = "Searching the web, then checking GitHub, GitLab, Codeberg, and SourceHut…"
-        renderFind()
-        UiBridge.busyUpdate()
         DebugLog.step("find", "start chars=${query.length} provider=${provider.id}")
-        AppState.io.execute {
+        launchTask("Searching", AppState.Tab.SEARCH, setOf(Res.FIND), track = false) {
             val result = try {
                 FossSearch.search(query, provider, key, model, base, FossFeed.matching(this, query))
             } catch (t: Throwable) {
@@ -1387,13 +1394,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             AppState.findNews = result.news
             AppState.findBrief = result.brief
             AppState.findNote = result.note
-            AppState.findBusy = false
             DebugLog.step("find", "done hits=${result.hits.size}")
-            UiBridge.busyUpdate()
             runOnUiThread {
                 if (!isFinishing) renderFind()
             }
+            null
         }
+        renderFind()
     }
 
     private fun renderFind() {
@@ -1507,7 +1514,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private fun downloadHit(hit: FossSearch.RepoHit) {
         if (AppState.downloadBusy || AppState.importBusy) return
         if (editing) closeEditor(save = true)
-        AppState.downloadBusy = true
         AppState.downloadNote = "Downloading ${hit.name}…"
         saveEditor(announce = false)
         binding.bottomNav.selectedItemId = R.id.nav_files
@@ -1515,8 +1521,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         paintBusy()
         AppState.log("clone ${hit.cloneUrl}")
         val app = applicationContext
-        val job = startJob("Cloning ${hit.name}", AppState.Tab.FILES)
-        AppState.io.execute {
+        launchTask("Cloning ${hit.name}", AppState.Tab.FILES, setOf(Res.DOWNLOAD)) {
             var failed: String? = null
             try {
                 val url = GitClient.normalizeGitUrl(hit.cloneUrl)
@@ -1541,17 +1546,16 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 failed = "clone failed: ${t.message ?: t.javaClass.simpleName}"
                 AppState.log(failed)
             } finally {
-                AppState.downloadBusy = false
                 AppState.downloadNote = null
                 UiBridge.filesChanged()
-                UiBridge.busyUpdate()
-                if (failed == null) Jobs.end(job, "Clone finished", "${hit.name} is open in Files.")
-                else Jobs.end(job, "Clone failed", failed.orEmpty())
             }
-            val message = failed ?: return@execute
-            runOnUiThread {
-                if (!isFinishing && !editing) binding.filesPage.filesPath.text = message
+            failed?.let { message ->
+                runOnUiThread {
+                    if (!isFinishing && !editing) binding.filesPage.filesPath.text = message
+                }
             }
+            if (failed == null) TaskRunner.Done("Clone finished", "${hit.name} is open in Files.")
+            else TaskRunner.Done("Clone failed", failed.orEmpty())
         }
     }
 
@@ -1972,7 +1976,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             return
         }
         val focus = binding.understandPage.understandFocus.text?.toString()?.trim().orEmpty()
-        AppState.understandBusy = true
         AppState.understandRepo = root
         AppState.understandStop.set(false)
         AppState.understandNote = "Starting"
@@ -1980,8 +1983,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         understandRendered = ""
         understandShowSource = false
         UiBridge.understandUpdate()
-        val job = startJob("Understanding ${root.name}", AppState.Tab.UNDERSTAND)
-        AppState.io.execute {
+        launchTask("Understanding ${root.name}", AppState.Tab.UNDERSTAND, setOf(Res.UNDERSTAND)) {
             var title = "Understand failed"
             var summary = ""
             try {
@@ -2009,11 +2011,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 DebugLog.step("understand", "fail ${t.javaClass.simpleName}: $msg")
                 AppState.log("understand error: $msg")
             } finally {
-                AppState.understandBusy = false
                 AppState.understandStop.set(false)
                 UiBridge.understandUpdate()
-                Jobs.end(job, title, summary)
             }
+            TaskRunner.Done(title, summary)
         }
     }
 
@@ -2186,7 +2187,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun loadReleases() {
-        AppState.io.execute {
+        graph.scope.launch(graph.dispatchers.repo) {
             val tags = runCatching { GitOps.tags(AppState.cwd, AppState.reposDir) }.getOrDefault(emptyList())
             runOnUiThread { renderReleases(tags) }
         }
@@ -2237,18 +2238,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             AppState.log("Release needs a name")
             return
         }
-        AppState.gitBusy = true
-        onGit()
-        val job = startJob("Create release", AppState.Tab.GIT)
-        AppState.io.execute {
+        launchTask("Create release", AppState.Tab.GIT, setOf(Res.GIT)) {
             val text = try {
                 GitOps.createTag(AppState.cwd, AppState.reposDir, name, notes)
             } catch (t: Throwable) {
                 t.message ?: t.javaClass.simpleName
             }
             val tags = runCatching { GitOps.tags(AppState.cwd, AppState.reposDir) }.getOrDefault(emptyList())
-            AppState.gitBusy = false
-            Jobs.end(job, "Release finished", text)
             runOnUiThread {
                 AppState.log(text)
                 renderReleases(tags)
@@ -2258,7 +2254,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 }
                 onGit()
             }
+            TaskRunner.Done("Release finished", text)
         }
+        onGit()
     }
 
     private fun setupBuild() {
@@ -2335,12 +2333,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         saveEditor(announce = false)
         val url = store.buildUrl()
         val token = store.buildToken()
-        AppState.buildBusy = true
         AppState.clearBuild()
         val appContext = applicationContext
-        val job = startJob("Building APK", AppState.Tab.BUILD)
         val started = System.currentTimeMillis()
-        AppState.io.execute {
+        launchTask("Building APK", AppState.Tab.BUILD, setOf(Res.BUILD)) {
             var cloud = false
             var title = "Build failed"
             var summary = ""
@@ -2401,10 +2397,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 summary = t.message ?: t.javaClass.simpleName
             } finally {
                 BuildHistory.record(repo, started, built != null, built?.name, summary, AppState.buildText())
-                AppState.buildBusy = false
                 UiBridge.buildUpdate()
-                Jobs.end(job, title, summary, built)
             }
+            TaskRunner.Done(title, summary, built)
         }
     }
 
@@ -2427,12 +2422,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             AppState.log(message)
             return
         }
-        AppState.reviseBusy = true
         UiBridge.buildUpdate()
         val open = AppState.openFile
         val cwd = AppState.cwd
-        val job = startJob("Revising from build log", AppState.Tab.BUILD)
-        AppState.io.execute {
+        launchTask("Revising from build log", AppState.Tab.BUILD, setOf(Res.REVISE)) {
             val note: (String) -> Unit = { line ->
                 AppState.buildLog(line)
                 AppState.log(line)
@@ -2474,10 +2467,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 note("revise failed: ${t.message ?: t.javaClass.simpleName}")
                 summary = t.message ?: t.javaClass.simpleName
             } finally {
-                AppState.reviseBusy = false
                 UiBridge.buildUpdate()
-                Jobs.end(job, title, summary)
             }
+            TaskRunner.Done(title, summary)
         }
     }
 
@@ -2794,7 +2786,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val base = binding.vibePage.baseUrl.text?.toString()?.trim().orEmpty()
         val open = AppState.openFile
         val cwd = AppState.cwd
-        AppState.vibeBusy = true
         AppState.vibeRepo = root
         AppState.vibeResult = ""
         AppState.writtenPaths = emptyList()
@@ -2803,12 +2794,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         showTab(AppState.Tab.VIBE)
         binding.vibePage.vibeTabs.getTabAt(0)?.select()
         UiBridge.vibeUpdate()
-        val job = startJob("Agent working", AppState.Tab.VIBE)
-        runAgent(job, instruction, provider, key, model, base, open, cwd, root)
+        runAgent(instruction, provider, key, model, base, open, cwd, root)
     }
 
     private fun runAgent(
-        job: Jobs.Job,
         instruction: String,
         provider: Provider,
         key: String,
@@ -2822,7 +2811,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val buildUrl = store.buildUrl()
         val buildToken = store.buildToken()
         val earlier = AppState.history.toList()
-        AppState.agentIo.execute {
+        launchTask("Agent working", AppState.Tab.VIBE, setOf(Res.AGENT), lane = graph.dispatchers.agent) {
             DebugLog.step("agent", "start provider=${provider.id} model=$model chars=${instruction.length}")
             var started: AgentContext? = null
             var title = "Agent error"
@@ -2887,11 +2876,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 DebugLog.step("agent", "fail ${t.javaClass.simpleName}: $msg")
                 AppState.log("agent error: $msg")
             } finally {
-                AppState.vibeBusy = false
                 AppState.agentStop.set(false)
                 UiBridge.vibeUpdate()
-                Jobs.end(job, title, AppState.vibeResult)
             }
+            TaskRunner.Done(title, AppState.vibeResult)
         }
     }
 
@@ -2911,13 +2899,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         if (AppState.importBusy || AppState.downloadBusy) return
         saveEditor(announce = false)
         val app = applicationContext
-        AppState.importBusy = true
         AppState.downloadNote = "Importing folder…"
         AppState.log("importing folder…")
         refreshFileList()
-        paintBusy()
-        val job = startJob("Importing folder", AppState.Tab.FILES)
-        AppState.io.execute {
+        launchTask("Importing folder", AppState.Tab.FILES, setOf(Res.IMPORT)) {
             try {
                 val dest = FolderImport.importTree(app, uri, AppState.reposDir, AppState::log)
                 WorkspaceStore.include(dest.name)
@@ -2926,18 +2911,17 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 AppState.gitDetail = null
                 AppState.gitSnapshot = null
                 UiBridge.projectChanged()
-                Jobs.end(job, "Import finished", "${dest.name} is open in Files.")
+                TaskRunner.Done("Import finished", "${dest.name} is open in Files.")
             } catch (t: Throwable) {
                 val msg = t.message ?: t.javaClass.simpleName
                 AppState.log("open failed: $msg")
-                Jobs.end(job, "Import failed", msg)
+                TaskRunner.Done("Import failed", msg)
             } finally {
-                AppState.importBusy = false
                 AppState.downloadNote = null
                 UiBridge.filesChanged()
-                UiBridge.busyUpdate()
             }
         }
+        paintBusy()
     }
 
     private fun showProjects() {
@@ -2976,17 +2960,16 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun refreshGit() {
         if (AppState.gitBusy) return
-        AppState.gitBusy = true
-        onGit()
-        AppState.io.execute {
+        launchTask("Git working", AppState.Tab.GIT, setOf(Res.GIT), track = false) {
             AppState.gitSnapshot = runCatching {
                 GitOps.snapshot(AppState.cwd, AppState.reposDir)
             }.getOrElse {
                 GitOps.Snapshot("", it.message ?: "git failed", emptyList(), false)
             }
-            AppState.gitBusy = false
             UiBridge.gitUpdate()
+            null
         }
+        onGit()
     }
 
     private fun closeGitDetail() {
@@ -2997,10 +2980,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private fun runGit(label: String? = null, block: () -> String?) {
         if (AppState.gitBusy) return
         saveEditor(announce = false)
-        AppState.gitBusy = true
-        onGit()
-        val job = label?.let { startJob(it, AppState.Tab.GIT) }
-        AppState.io.execute {
+        launchTask(label ?: "Git working", AppState.Tab.GIT, setOf(Res.GIT), track = label != null) {
             DebugLog.step("git", "start")
             val msg = try {
                 block()
@@ -3008,7 +2988,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 DebugLog.step("git", "fail ${t.javaClass.simpleName}: ${t.message}")
                 t.message ?: t.javaClass.simpleName
             }
-            if (job != null) Jobs.end(job, "$label finished", msg.orEmpty())
             if (!msg.isNullOrBlank()) {
                 DebugLog.step("git", "result ${msg.lineSequence().firstOrNull().orEmpty()}")
                 AppState.log(msg)
@@ -3018,10 +2997,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             }.getOrElse {
                 GitOps.Snapshot("", it.message ?: "git failed", emptyList(), false)
             }
-            AppState.gitBusy = false
             UiBridge.gitUpdate()
             UiBridge.filesChanged()
+            if (label != null) TaskRunner.Done("$label finished", msg.orEmpty()) else null
         }
+        onGit()
     }
 
     private fun commitGit() {
@@ -3247,11 +3227,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             return
         }
         saveEditor(announce = false)
-        AppState.gitBusy = true
-        onGit()
         val cwd = AppState.cwd
         val repos = AppState.reposDir
-        AppState.io.execute {
+        launchTask("Git working", AppState.Tab.GIT, setOf(Res.GIT), track = false) {
             val text = try {
                 val files = snap.changes.joinToString("\n") { it.label }
                 val diff = GitOps.diff(cwd, repos, null, false).take(4000)
@@ -3270,27 +3248,28 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 AppState.log(t.message ?: "could not write a message")
                 ""
             }
-            AppState.gitBusy = false
             runOnUiThread {
                 if (!isFinishing && text.isNotEmpty()) binding.gitPage.gitMessage.setText(text)
                 onGit()
             }
+            null
         }
+        onGit()
     }
 
     private fun showBranches() {
         if (AppState.gitBusy) return
-        AppState.io.execute {
+        graph.scope.launch(graph.dispatchers.repo) {
             val names = try {
                 GitOps.branches(AppState.cwd, AppState.reposDir)
             } catch (t: Throwable) {
                 AppState.log(t.message ?: "git failed")
                 null
-            } ?: return@execute
+            } ?: return@launch
             runOnUiThread {
                 if (isFinishing) return@runOnUiThread
                 val items = (names + "New branch").toTypedArray()
-                AlertDialog.Builder(this)
+                AlertDialog.Builder(this@MainActivity)
                     .setTitle("Branch")
                     .setItems(items) { _, which ->
                         if (which == names.size) promptNewBranch()

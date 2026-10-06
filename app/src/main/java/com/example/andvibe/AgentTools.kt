@@ -1,6 +1,7 @@
 package com.example.andvibe
 
 import com.example.andvibe.core.GitClient
+import com.example.andvibe.tasks.Res
 import com.example.andvibe.core.GitOps
 import com.example.andvibe.core.JsRunner
 import com.example.andvibe.core.RepoFiles
@@ -308,8 +309,7 @@ object AgentTools {
         if (ctx.buildUrl.isBlank() || ctx.buildToken.isBlank()) {
             error("the Cloud Run URL or token is not set. The user sets them on Console → Variables.")
         }
-        if (AppState.buildBusy) error("a build is already running")
-        AppState.buildBusy = true
+        if (!AppState.tasks.tryClaim(Res.BUILD)) error("a build is already running")
         AppState.clearBuild()
         val log = StringBuilder()
         val note: (String) -> Unit = { line ->
@@ -338,7 +338,7 @@ object AgentTools {
             return "BUILD FAILED: $message\n\n" + tail(log.toString(), 14_000)
         } finally {
             BuildHistory.record(ctx.repo.name, started, built != null, built?.name, summary, AppState.buildText())
-            AppState.buildBusy = false
+            AppState.tasks.release(Res.BUILD)
             UiBridge.buildUpdate()
         }
     }

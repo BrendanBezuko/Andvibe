@@ -9,6 +9,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.example.andvibe.tasks.TaskRunner
 
 class WorkService : Service() {
     private var wake: PowerManager.WakeLock? = null
@@ -29,7 +30,7 @@ class WorkService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val jobs = Jobs.active()
+        val jobs = (applicationContext as AndVibeApp).graph.tasks.tracked()
         val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
         try {
             ServiceCompat.startForeground(this, Notify.WORKING_ID, Notify.working(this, jobs), type)
@@ -57,7 +58,7 @@ class WorkService : Service() {
         super.onDestroy()
     }
 
-    private fun show(jobs: List<Jobs.Job>) {
+    private fun show(jobs: List<TaskRunner.Task>) {
         Notify.update(this, Notify.WORKING_ID, Notify.working(this, jobs))
         wake?.acquire(WAKE_MS)
     }
@@ -74,8 +75,7 @@ class WorkService : Service() {
         private var starting = false
 
         // Main thread only.
-        fun sync(context: Context) {
-            val jobs = Jobs.active()
+        fun sync(context: Context, jobs: List<TaskRunner.Task>) {
             val service = current
             when {
                 jobs.isEmpty() -> service?.finish()
