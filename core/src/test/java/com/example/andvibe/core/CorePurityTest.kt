@@ -10,8 +10,8 @@ class CorePurityTest {
     @Test
     fun coreHasNoAndroidImports() {
         val dir = sequenceOf(
-            "src/main/java/com/example/andvibe/core",
-            "app/src/main/java/com/example/andvibe/core",
+            "src/main/java/com/example/andvibe/core", // :core module cwd
+            "core/src/main/java/com/example/andvibe/core",
         ).map(::File).firstOrNull { it.isDirectory }
         assertTrue("core source dir not found from ${File(".").absolutePath}", dir != null)
         val offenders = dir!!.walkTopDown()

@@ -70,13 +70,12 @@ tasks.configureEach {
 }
 
 dependencies {
+    implementation(project(":core"))
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)
     implementation(libs.material)
+    // Kept only to one-time-migrate existing EncryptedSharedPreferences blobs.
     implementation(libs.androidx.security.crypto)
-    implementation(libs.jgit)
-    implementation(libs.slf4j.nop)
-    implementation(libs.rhino)
     implementation(libs.apksig)
     implementation(libs.spongycastle.core)
     implementation(libs.spongycastle.prov)

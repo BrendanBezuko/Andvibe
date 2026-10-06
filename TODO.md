@@ -25,7 +25,7 @@
 - [x] Phase 4: per-tab features (Search → Understand → Build → Console → Git → Vibe → rest);
       persist draft text (Vibe prompt, commit message) when touching those tabs
 - [x] Phase 5: delete `AppState`/`UiBridge`; MainActivity → nav shell
-- [ ] Phase 6: hardening (`:core` module, deprecation migrations below)
+- [x] Phase 6: hardening (`:core` module, deprecation migrations below)
 
 Per phase/tab smoke pass before checking the box: open → main action → rotate → background →
 notification fires → MCP still responds. The rebuild's biggest risk is silent behavior drift,
@@ -49,8 +49,8 @@ Do these when already touching the file, never as standalone rebuild work:
 - Vulnerability scanner for vibed apps.
 - MobSF static scan as a Build tab step: MobSF Docker image on the self-hosted runner like
   the builder, POST each APK to its REST API, show the report next to the VirusTotal result.
-- Migrate deprecated APIs: `ApkSigner.SignerConfig.Builder` constructor (ApkPackager.kt:47),
-  `EncryptedSharedPreferences` (androidx.security-crypto is deprecated upstream).
+- ~~Migrate deprecated APIs: `ApkSigner.SignerConfig.Builder` → `KeyConfig.Jca`;
+  `EncryptedSharedPreferences` → KeystorePrefs (one-time ESP migrate).~~
 - Self-hosted Cloud Run replacement (not GCP-locked): pick a Docker host that can scale to
   near-zero and stay simple to operate — Coolify first (best Cloud Run-like / complexity
   tradeoff); Knative or K8s+Knative if true scale-to-zero is required; Dokku or plain

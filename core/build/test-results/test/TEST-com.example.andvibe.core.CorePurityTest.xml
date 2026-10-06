@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.andvibe.core.CorePurityTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-10-06T13:08:24.016Z" hostname="MacBook-Pro-2.local" time="0.042">
+  <properties/>
+  <testcase name="coreHasNoAndroidImports" classname="com.example.andvibe.core.CorePurityTest" time="0.042"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

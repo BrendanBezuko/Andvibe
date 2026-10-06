@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.andvibe.core.ZipWriterTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-10-06T13:08:24.089Z" hostname="MacBook-Pro-2.local" time="0.019">
+  <properties/>
+  <testcase name="emptyArchiveIsReadable" classname="com.example.andvibe.core.ZipWriterTest" time="0.002"/>
+  <testcase name="archiveHasNoTrailingGarbage" classname="com.example.andvibe.core.ZipWriterTest" time="0.002"/>
+  <testcase name="utf8NamesSurvive" classname="com.example.andvibe.core.ZipWriterTest" time="0.002"/>
+  <testcase name="rejectsUseAfterFinish" classname="com.example.andvibe.core.ZipWriterTest" time="0.001"/>
+  <testcase name="rejectsDirectoryAndEmptyNames" classname="com.example.andvibe.core.ZipWriterTest" time="0.001"/>
+  <testcase name="roundTripPreservesContentCrcAndMethod" classname="com.example.andvibe.core.ZipWriterTest" time="0.004"/>
+  <testcase name="storedEntryDataIsFourByteAligned" classname="com.example.andvibe.core.ZipWriterTest" time="0.005"/>
+  <testcase name="rejectsDuplicateNames" classname="com.example.andvibe.core.ZipWriterTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

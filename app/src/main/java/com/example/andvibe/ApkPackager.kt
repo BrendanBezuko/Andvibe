@@ -6,6 +6,7 @@ import com.example.andvibe.core.ZipWriter
 
 import android.content.Context
 import com.android.apksig.ApkSigner
+import com.android.apksig.KeyConfig
 import org.spongycastle.asn1.x500.X500Name
 import org.spongycastle.cert.jcajce.JcaX509CertificateConverter
 import org.spongycastle.cert.jcajce.JcaX509v3CertificateBuilder
@@ -48,7 +49,7 @@ object ApkPackager {
         writeUnsigned(template, unsigned, assets)
         val signed = ApkLibrary.place(context, "${safeName(root.name)}.apk")
         val (key, cert) = debugSigner(context)
-        val config = ApkSigner.SignerConfig.Builder("andvibe", key, listOf(cert)).build()
+        val config = ApkSigner.SignerConfig.Builder("andvibe", KeyConfig.Jca(key), listOf(cert)).build()
         ApkSigner.Builder(listOf(config))
             .setInputApk(unsigned)
             .setOutputApk(signed)

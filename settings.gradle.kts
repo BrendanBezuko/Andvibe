@@ -24,4 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "AndVibe"
 include(":app")
+include(":core")
 include(":shell")
