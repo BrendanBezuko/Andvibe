@@ -58,6 +58,47 @@ Condensed from a full code audit; line references are to the current `main`.
 
 ## 3. Target architecture
 
+```
+                 ┌───────────────────────────────────────────┐
+                 │ MainActivity — navigation shell           │
+                 │ (binding, nav, overlays, permissions)     │
+                 └───────────────────┬───────────────────────┘
+                                     │ one per tab
+                 ┌───────────────────▼───────────────────────┐
+                 │ Page controllers — render state,          │
+                 │ forward clicks, run one-shot effects      │
+                 └───────────────────┬───────────────────────┘
+               collect StateFlow ▲   │ call feature functions
+                 ┌───────────────┴───▼───────────────────────┐
+                 │ Features (one per tab) — own UI state,    │
+                 │ orchestrate work, emit effects            │
+                 └───────┬───────────────────────┬───────────┘
+                         │ shared domain work    │
+                 ┌───────▼────────┐    ┌─────────▼──────────┐
+                 │ AgentRuntime   │    │ BuildService       │
+                 │ loop · models  │    │ (Build tab + the   │
+                 │ tools · events │    │  agent build tool) │
+                 └───────┬────────┘    └─────────┬──────────┘
+                         │                       │
+                 ┌───────▼───────────────────────▼───────────┐
+                 │ TaskRunner — scheduling, cancellation,    │
+                 │ resource locks, foreground service, done  │
+                 │ notifications                             │
+                 └───────────────────┬───────────────────────┘
+                                     │
+                 ┌───────────────────▼───────────────────────┐
+                 │ net/  AiClient · CloudBuild (HTTP)        │
+                 │ data/ stores (files · prefs · secrets)    │
+                 │ core/ pure JVM: RepoFiles · GitOps ·      │
+                 │       ZipWriter · JsRunner · Understand   │
+                 └───────────────────────────────────────────┘
+```
+
+**The governing rule:** UI renders state. Features express intent and own state. Services
+perform domain work shared by more than one consumer. TaskRunner manages execution. No layer
+reaches upward — the compile-time test is that nothing below `features/` imports from it or
+from `ui/`.
+
 ### 3.1 Layering and package map
 
 Dependencies point strictly downward. Nothing below `features/` knows about Android UI; nothing
@@ -74,7 +115,8 @@ com.example.andvibe
 │               WorkspaceStore, ChatStore, PromptStore, ProjectStore, SecretStore,
 │               BuildHistory, ApkLibrary, FossFeed, DebugLog.
 ├── net/        AiClient, Provider, CloudBuild. Blocking HTTP wrapped in suspend funs.
-├── agent/      Agent loop, AgentModel implementations, AgentTools, AgentContext.
+├── agent/      AgentRuntime: loop, AgentModel implementations, ToolRegistry,
+│               AgentContext, AgentEvent stream (§3.7).
 ├── tasks/      TaskRunner (the one job system), WorkService, Notify.
 ├── features/   One state holder per tab + orchestration. No View/Activity references.
 │               console/, board/, files/, search/, git/, vibe/, understand/, build/,
@@ -96,7 +138,10 @@ all `Handler.post` relays, and the cooperative stop booleans are replaced.
 - `repoDispatcher = Dispatchers.IO.limitedParallelism(1)` — everything that mutates the open
   repo's working tree or git state: console commands, git ops, agent tool execution, import,
   clone, local packaging. Today's correctness depends on `AppState.io` serializing these; we keep
-  that guarantee but scope it to repo-mutating work only.
+  that guarantee but scope it to repo-mutating work only. Note this single lane intentionally
+  serializes across *different* repos too — an accepted Phase 2 simplification identical to
+  today's behavior; a per-root `Mutex`/dispatcher is the upgrade path if multi-repo parallelism
+  is ever wanted (see Decisions).
 - `Dispatchers.IO` (parallel) — network and read-only work: search, feed refresh, cloud-build
   upload/log streaming, AI calls, release listing. These no longer queue behind a build.
 - `Dispatchers.Main` — UI. No more hand-rolled `Handler(Looper.getMainLooper())`.
@@ -107,7 +152,10 @@ to `repoDispatcher`, which also removes the current `cloud_build`-vs-`startBuild
 
 ### 3.3 One task system: `TaskRunner`
 
-Replaces **both** the 10 busy flags and the `Jobs` registry.
+Replaces **both** the 10 busy flags and the `Jobs` registry. TaskRunner is a **scheduler, not a
+domain object**: it knows about jobs, cancellation, lifecycle, and resource locks. It does not
+know what "build" or "agent" means — those semantics live in the features/services that declare
+the resources they hold.
 
 ```kotlin
 class TaskRunner(
@@ -118,27 +166,37 @@ class TaskRunner(
     class Task internal constructor(
         val id: Int, val label: String, val tab: Tab,
         val started: Long, internal val job: Job,
-        val exclusive: ExclusiveKey?,
+        val holds: Set<Resource>,
     ) { fun cancel() = job.cancel() }
-
-    enum class ExclusiveKey { REPO_WORK, AGENT, BUILD, UNDERSTAND }
 
     val active: StateFlow<List<Task>>             // drives busy UI + WorkService + notifications
 
     fun launch(
         label: String, tab: Tab,
-        exclusive: ExclusiveKey? = null,          // launching with a held key fails fast
+        holds: Set<Resource> = emptySet(),        // fails fast if any is already held
         context: CoroutineContext = EmptyCoroutineContext,
         onDone: (Result<Unit>) -> Unit = {},
         block: suspend CoroutineScope.() -> Unit,
     ): Task
 }
+
+@JvmInline value class Resource(val key: String)  // opaque to the scheduler
+```
+
+Callers define their own resource tokens, keyed by what they actually contend on:
+
+```kotlin
+fun repo(root: File)  = Resource("repo:${root.canonicalPath}")
+fun build(root: File) = Resource("build:${root.canonicalPath}")
+fun agent()           = Resource("agent")
 ```
 
 - **Busy is derived, not stored.** A feature is busy iff it has an active task; the global busy
   label is `active.last().label`. The 10 flags and `anyBusy()/busyLabel()` are deleted.
-- **Mutual exclusion is declared, not hand-checked.** `ExclusiveKey.BUILD` makes the
-  `cloudBuild`-tool-vs-Build-tab race impossible by construction.
+- **Mutual exclusion is declared, not hand-checked.** `BuildService` claims `build(root)` whether
+  invoked from the Build tab or the agent's `cloud_build` tool, so that race is impossible by
+  construction — and because the tokens are per-repo strings rather than app-wide enum values,
+  supporting parallel work across repos/workspaces later requires no scheduler change.
 - **Everything is cancellable.** Stop buttons call `task.cancel()`; blocking sections
   (`HttpURLConnection`, JGit) poll `ensureActive()` / check `coroutineContext.isActive` at the
   same granularity as today's agent stop flag ("takes effect after the current call returns" is
@@ -148,6 +206,13 @@ class TaskRunner(
   observes `active` and starts/updates/stops itself. `Notify.done` fires from `onDone` when the
   app is invisible — visibility comes from a `ProcessLifecycleOwner`-style flag owned by
   TaskRunner, not a `@Volatile` in `Jobs`.
+- **Service promotion can still lose the race** on Android 12+: if the user hits Home between
+  `launch` and the service start, `startForegroundService` throws
+  `ForegroundServiceStartNotAllowedException`. `WorkServiceController` catches it and degrades
+  gracefully: the task **keeps running** (coroutines don't need the service — it only buys
+  process priority and the wakelock), and the controller re-attempts promotion the next time the
+  app is foregrounded while tasks are active. This is a latent crash in today's
+  `Jobs.begin → WorkService.sync` path, fixed by construction here.
 
 ### 3.4 Feature state holders (the death of `UiBridge`)
 
@@ -174,14 +239,34 @@ class GitFeature(
 
 - The UI collects with `repeatOnLifecycle(STARTED)` and renders the whole state. The 13
   `UiBridge` callbacks become per-feature flows; "re-render everything on any change" dies.
-- **One-shot UI effects** (open editor, launch preview, scroll-to-bottom) are a small
-  `SharedFlow<UiEffect>` per feature — they are *requests to the UI*, never state.
+- **One-shot UI effects** (open editor, launch preview, scroll-to-bottom) are a sealed type per
+  feature, backed by a **`Channel(BUFFERED)` exposed as `channel.receiveAsFlow()`** — not a
+  `SharedFlow`. A `SharedFlow` with no collector drops the emission, so an effect fired while the
+  Activity is stopped (an agent finishing in the background and requesting an editor open) would
+  vanish; a buffered channel holds it and delivers exactly once when collection resumes. Today's
+  `UiBridge` has precisely this drop bug (`listener == null` → the post is lost). Effects are
+  *requests to the UI*, never state. The litmus test: **state can be re-rendered at any time; an
+  effect must happen exactly once.** Anything that would misbehave if replayed on rotation is an
+  effect.
+
+  ```kotlin
+  sealed interface GitEffect {
+      data class OpenFile(val file: File) : GitEffect
+      data class ShowError(val message: String) : GitEffect
+      data object ClearMessageField : GitEffect   // today's gitMessageClear flag, done right
+  }
+  ```
 - **State mutations move out of UI callbacks.** The agent result is committed to chat by
   `VibeFeature` when the agent task completes — whether or not an Activity exists. `onVibe`'s
   current behavior (MainActivity.kt:312) is the textbook bug this fixes.
 - **Cross-cutting state** gets its own holders, injected where needed:
   - `ProjectSession` — `cwd`, open file, repos dir, workspace-fit rules (today scattered across
     `AppState.cwd/openFile/fitWorkspace/inWorkspace` and the `Console.kt` extension functions).
+    **Switch policy:** changing project or workspace is *refused* while any task holds
+    `repo(currentRoot)` or `agent()` — the switch checks TaskRunner and fails with the blocking
+    task's label. This makes invariant 8 structural, replacing `ChatStore`'s current
+    "refuse while `vibeBusy`" guard. (The agent's own `create_project` tool is the one sanctioned
+    root change, and it runs *inside* the agent's task.)
   - `ConsoleLog` / `BuildLog` — `BoundedLog` wrapped with a `MutableStateFlow<Long>` revision so
     the UI can observe appends cheaply.
   - `UsageMeter` — replaces the `WorkspaceStore.addUse → UiBridge.usageUpdate` hidden UI call.
@@ -191,6 +276,9 @@ class GitFeature(
   ```kotlin
   interface ScreenshotSource { suspend fun capture(tab: Tab?): Bitmap? }
   ```
+
+  Registered in `onStart`, unregistered in `onStop`, so the graph never holds a reference to a
+  stopped Activity.
 
 ### 3.5 Dependency graph: manual `AppGraph`
 
@@ -236,17 +324,51 @@ class AppGraph(app: Application) {
   the agent runs" rule.
 - Keep the atomic `.tmp` + rename write pattern; keep file formats unchanged (no data migration).
 
-### 3.7 The agent subsystem
+### 3.7 AgentRuntime — a subsystem, not a feature
 
-- `Agent.run` becomes a `suspend` function taking an `AgentContext` that carries everything it
-  needs (repo root, prompts, keys, build config, callbacks) — no `AppState`, no `UiBridge`.
-- Progress flows out through the structured channel it already almost has (`onStep`), surfaced by
-  `VibeFeature` as state; `agentSteps`'s synchronized-list-capped-at-300 behavior moves into the
-  feature.
-- `AgentTools.cloudBuild` calls `BuildFeature.startCloudBuild()` (or rather a shared
-  `BuildService` both use) under `ExclusiveKey.BUILD` instead of duplicating build logic.
-- Model implementations (`AnthropicModel` etc.) are unchanged in logic, moved under `agent/`, and
-  get JVM tests with canned HTTP transcripts (inject a `HttpCall` function to fake).
+The agent is the core of the product; the Vibe tab is merely its primary UI. Today its progress
+reporting is three bespoke paths (an `onStep` callback that mutates a global list, direct
+`UiBridge` calls from inside the loop, and DebugMcp reading globals). The runtime makes it one:
+
+```
+agent/
+├── AgentRuntime    entry point: start(request): AgentRun — at most one run (Resource("agent"))
+├── AgentLoop       plan/execute phases (today's Agent.run) as a suspend fun; cancellable
+├── AgentModel      AnthropicModel · OpenAiModel · ResponsesModel · GeminiModel (logic unchanged)
+├── ToolRegistry    List<Tool> where Tool = { name, schema, suspend execute(ctx, args) } —
+│                   replaces the monolithic dispatch in AgentTools; tools become individually
+│                   testable, and per-tool permissions become a list filter later
+├── AgentContext    repo root, session, prompts, keys, services — no AppState, no UiBridge
+└── AgentEvent      sealed progress stream replacing the onStep string callback
+```
+
+```kotlin
+sealed interface AgentEvent {
+    data class Step(val text: String) : AgentEvent
+    data class ToolCall(val name: String, val summary: String) : AgentEvent
+    data class FilesChanged(val paths: List<String>) : AgentEvent
+    data class Usage(val tokens: Long, val cost: Double) : AgentEvent
+    data class Done(val result: String, val writtenPaths: List<String>) : AgentEvent
+    data class Failed(val message: String) : AgentEvent
+}
+
+class AgentRun(val events: Flow<AgentEvent>, private val task: TaskRunner.Task) {
+    fun cancel() = task.cancel()
+}
+```
+
+- **The runtime owns its exclusivity.** `start` claims `Resource("agent")` via TaskRunner
+  *itself* — callers (Vibe, DebugMcp, future automation) cannot accidentally start a second run.
+  A second `start` while one is active **fails fast**, returning the running run's label; it does
+  not queue and does not cancel the previous run (matches today's UX, where Send becomes Stop).
+- `VibeFeature` folds the event stream into chat state (including the commit-to-`ChatStore` on
+  `Done` — no Activity required). DebugMcp and the done-notification consume the *same* stream.
+- The `cloud_build` tool calls the shared `BuildService` under `Resource("build:$root")` — the
+  same token the Build tab holds — instead of duplicating the build path.
+- Model adapters get JVM tests with canned HTTP transcripts (inject the HTTP call as a function).
+- **Explicitly not built now:** agent memory, run replay, multi-agent, evaluation harnesses.
+  Those are speculative; the event stream and the tool registry are precisely the two extension
+  points they would need, and having the seams is enough.
 
 ### 3.8 UI shell
 
@@ -258,6 +380,28 @@ class AppGraph(app: Application) {
   include-and-toggle-visibility navigation stays.
 - Rotation: nothing to do — features are app-scoped, so state survives exactly as it does today,
   but now by design instead of via the global singleton.
+- **Process death is not rotation.** App-scoped state dies when Android kills the backgrounded
+  process. That is already true today: the current app rebuilds from its persisted stores
+  (`ProjectStore` restores the last project, `ChatStore` the conversation, `BuildHistory` the
+  last build log) and loses the rest. The contract here is **parity, made explicit**: every
+  feature must initialize its state from its store, never assume a warm start. Restoring purely
+  transient UI (active tab, open editor file, unsent draft) via `SavedStateHandle`/Bundle is a
+  deliberate non-goal for the rebuild — worth revisiting in Phase 6 if it bites.
+
+### 3.9 Vocabulary
+
+Four words, used consistently in code and in this document:
+
+| Word | Meaning | Lives in | Replayable? |
+|---|---|---|---|
+| **State** | current truth, renderable at any moment | `StateFlow` per feature | yes — rendering it twice is harmless |
+| **Effect** | something the UI must do exactly once | `Channel(BUFFERED)` → `receiveAsFlow()` per feature | no |
+| **Event** | something that happened (agent step, tool call) | `Flow<AgentEvent>` etc. | consumed once, *persisted* when it's history |
+| **Task** | work currently executing | `TaskRunner.active` | n/a — cancellable |
+
+`StateFlow` is never the historical record. History that matters is already persisted —
+`ChatStore` (conversations), `BuildHistory` (builds + logs), `DebugLog` (diagnostics) — and the
+features write to those stores from event streams, not from UI callbacks.
 
 ## 4. Key decisions
 
@@ -269,6 +413,10 @@ class AppGraph(app: Application) {
 | DI | Manual `AppGraph` | Hilt | ~15 injectables, one developer; annotation processing buys nothing here |
 | UI toolkit | Keep XML + controllers | Compose rewrite | Orthogonal to the actual problems; per-tab Compose stays possible later |
 | Busy tracking | Derived from TaskRunner | Keep flags, add locking | Flags are redundant once tasks are first-class; deriving removes the race class entirely |
+| Exclusion | Opaque per-repo resource tokens | Domain enum in the scheduler | Keeps TaskRunner domain-agnostic; multi-repo parallelism later costs nothing |
+| Feature API | Plain functions | MVI `dispatch(sealed Intent)` | Functions *are* intents and are equally JVM-testable; sealed-intent ceremony only pays off with middleware (logging/replay) we don't need |
+| Agent | First-class runtime with event stream + tool registry | Agent as just another feature | Three consumers (Vibe UI, DebugMcp, notifications) need the same progress stream; the product's core deserves its own boundary |
+| Services layer | Only where ≥2 consumers share it (AgentRuntime, BuildService) | A Service per feature | A `GitService` with one caller is indirection; features are the orchestration layer |
 | Modules | Packages now, `:core` later | Multi-module now | Enforce boundaries cheaply first; module split is mechanical once imports are clean |
 | UiBridge | Delete; per-feature flows + narrow `ScreenshotSource` | Keep as event bus | 13 coarse callbacks are the root of the "render everything, mutate in callbacks" pattern |
 
@@ -281,36 +429,54 @@ tested. Each phase lists its exit criteria.
 **Phase 0 — done.** `ZipWriter`, `BoundedLog` extracted; `ApkPackager`/`RepoFiles` under test
 (31 tests).
 
-**Phase 1 — Foundations (small, mechanical).**
+**Phase 1 — Foundations: AppGraph + ProjectSession (small, mechanical).**
 Add coroutines deps. Create `AppGraph` in `AndVibeApp`; move `AppState.init` contents there.
 Move `SecretStore` into the graph; delete the `GitOps` credential globals (pass a credentials
-provider). Convert `core/` candidates to the package layout; forbid `android.*` imports in
-`core/` (a simple lint/grep check in CI or a Gradle verification task).
+provider). Create **`ProjectSession`** now — it owns `cwd`, `openFile`, the repos dir, and the
+workspace-fit rules (including the `AppState` extension functions currently defined in
+`Console.kt`); `AppState.cwd`/`openFile` become delegating properties during the transition so
+existing call sites keep compiling. While moving each store, verify it needs only an Application
+context (current `AppState.init` already passes `applicationContext`, and the stores use
+files/prefs only — but check each; anything UI-flavored stays with the Activity).
+Convert `core/` candidates to the package layout; forbid
+`android.*` imports in `core/` (a simple grep/lint check).
 *Exit:* app boots with graph-constructed stores; `MainActivity` no longer constructs
-`SecretStore`; everything still reads `AppState` for the rest.
+`SecretStore`; project/workspace scoping has one owner; everything else still reads `AppState`.
 
 **Phase 2 — TaskRunner.**
 Implement `TaskRunner` + `WorkServiceController`; port `Jobs` callers; convert the launch sites
 in `MainActivity` (`startBuild`, `runGit`, `runUnderstand`, `downloadHit`, `startImport`,
-`findRepos`, `submitCommand`, `runAgent`) from `io.execute` to `tasks.launch` with exclusive
-keys. Busy flags become derived; delete them one at a time as each launch site converts. Add
-cancel affordances where stop flags existed (agent, understand) — identical UX.
+`findRepos`, `submitCommand`, `runAgent`) from `io.execute` to `tasks.launch`, each declaring
+the resources it holds. Busy flags become derived; delete them one at a time as each launch site
+converts. Add cancel affordances where stop flags existed (agent, understand) — identical UX.
 *Exit:* `Jobs`, `WorkService.sync` call sites, and all 10 busy flags deleted;
-`AppState.io/agentIo` deleted; `TaskRunnerTest` covers exclusion, derivation, cancellation,
-visibility-gated notifications (JVM, with injected service/notify fakes).
+`AppState.io/agentIo` deleted; `TaskRunnerTest` covers resource exclusion, busy derivation,
+cancellation, visibility-gated notifications, **and the promotion-degrade path** — a fake service
+controller that throws `ForegroundServiceStartNotAllowedException` must leave the task running
+and get a promotion retry on the next foreground signal (JVM, with injected service/notify
+fakes).
 
-**Phase 3 — Features, one tab at a time.**
-Order chosen easiest-first to harden the pattern before the hard ones:
+**Phase 3 — AgentRuntime + BuildService.**
+Pulled ahead of the tab migrations because the agent is the architecturally central subsystem
+and two later steps depend on it. Extract `BuildService` (cloud + local packaging paths shared
+by the Build tab and the agent). Restructure `agent/`: `AgentLoop` as a suspend function,
+`ToolRegistry` replacing the `AgentTools` dispatch, `AgentContext` without `AppState`/`UiBridge`,
+and the `AgentEvent` stream replacing `onStep` + the direct `UiBridge` calls. The `cloud_build`
+tool switches to `BuildService` (the `buildBusy` race dies here). The Vibe UI is *not* migrated
+yet — MainActivity temporarily adapts the event stream to its existing render calls.
+*Exit:* `agent/` has no `AppState`/`UiBridge` references; tool and model-adapter JVM tests exist;
+one build path; agent cancellable via its task.
+
+**Phase 4 — Features, one tab at a time.**
+Order chosen easiest-first to harden the pattern before the big ones:
 1. **Search/Find** (self-contained state: `find*` fields) → `SearchFeature`.
 2. **Understand** → `UnderstandFeature` (stop flag → cancellation).
-3. **Build** → `BuildFeature` + shared `BuildService`; `AgentTools.cloudBuild` switches to it
-   (race fixed here).
+3. **Build** → `BuildFeature` over the existing `BuildService` (state + history UI only).
 4. **Console** → `ConsoleFeature` + `ConsoleLog`; `Console.run` gets a context parameter
-   (session + log + stores) instead of `AppState`; the `AppState` extension functions in
-   `Console.kt` move to `ProjectSession`.
+   (session + log + stores) instead of `AppState`.
 5. **Git** → `GitFeature` (biggest UI surface, ~530 lines in MainActivity).
-6. **Vibe/Agent** → `VibeFeature` (chat ownership moves here; `onVibe` mutation bug dies;
-   `ChatStore` reach-ins removed).
+6. **Vibe** → `VibeFeature` folds `AgentEvent`s into chat state (chat ownership moves here; the
+   `onVibe` mutation bug dies; `ChatStore` reach-ins removed).
 7. **Files, Board, Workspace, Settings** → same pattern, mostly UI state.
 
 Per tab: extract the feature + state, re-point the `UiBridge` callback for that tab to a flow
@@ -320,13 +486,15 @@ into a page controller. The corresponding `AppState` fields are deleted at the e
 *Exit per tab:* no `AppState` field for that tab remains; its `UiBridge` callback is gone; the
 feature has state-transition tests.
 
-**Phase 4 — Shell cleanup.**
+**Phase 5 — Shell cleanup.**
 Delete `AppState` and `UiBridge` (by now empty except `ScreenshotSource`). `DebugMcp` re-pointed
 at features (`consoleLog.text()`, `gitFeature.state.value.snapshot`, `tasks.active`,
-`ScreenshotSource`). `Notify` takes tab via parameter. MainActivity is nav + controllers only.
-*Exit:* `grep -r "AppState\." app/src` returns nothing; MainActivity < ~400 lines.
+`ScreenshotSource`, `AgentRuntime` events). `Notify` takes tab via parameter. MainActivity is
+nav + controllers only.
+*Exit:* `grep -r "AppState\." app/src` returns nothing; no `ui/` imports under `mcp/`;
+MainActivity < ~400 lines.
 
-**Phase 5 — Optional hardening.**
+**Phase 6 — Optional hardening.**
 Extract `core/` into a `:core` pure-JVM Gradle module (tests run without the Android plugin).
 Consider per-tab Compose starting with the simplest page (Board). Migrate off deprecated
 `EncryptedSharedPreferences`/`ApkSigner.SignerConfig.Builder` constructor.
@@ -347,7 +515,7 @@ Consider per-tab Compose starting with the simplest page (Board). Migrate off de
 | `lastApk`, build buffer, `loadWorkspaceBuild` | `BuildFeature` + `BuildLog` |
 | `gitSnapshot`, `gitDetail`, `gitMessageClear` | `GitFeature` |
 | log buffer, `log/text/clear` | `ConsoleLog` |
-| `UiBridge` listener + 13 callbacks | per-feature `StateFlow`/`SharedFlow` |
+| `UiBridge` listener + 13 callbacks | per-feature `StateFlow` + effect `Channel` |
 | `UiBridge.screenshot` | `ScreenshotSource` |
 
 ## 7. Invariants to preserve (behavioral contract)
@@ -359,19 +527,25 @@ Consider per-tab Compose starting with the simplest page (Board). Migrate off de
 4. Agent Stop takes effect after the current model call returns.
 5. The agent result is committed to chat exactly once per run — *strengthened*: now also when no
    Activity exists.
-6. Rotation preserves all tab state and running work.
+6. Rotation preserves all tab state and running work. After process death, the app restores
+   everything it restores today (last project, chats, build history) by initializing features
+   from their stores — no regression, no new guarantees.
 7. On-disk formats (workspaces.json, chats, builds, prefs, secrets) unchanged — no migration.
-8. Chat cannot be swapped out from under a running agent.
+8. Chat cannot be swapped out from under a running agent — enforced structurally: project and
+   workspace switches are refused while `repo(currentRoot)` or `agent()` is held (§3.4).
 9. Keys never leave the phone except in provider API calls; build uploads exclude them.
 
 ## 8. Risks and mitigations
 
-- **Biggest risk: Phase 3 rewiring of MainActivity render paths.** Mitigation: per-tab, two-step
+- **Biggest risk: Phase 4 rewiring of MainActivity render paths.** Mitigation: per-tab, two-step
   (logic first, rendering second); the tab keeps working off the old callback until its feature
   flow is proven; manual smoke script per tab (open, run the tab's main action, rotate, background
   → notification).
 - **Cancellation of blocking I/O** (JGit, `HttpURLConnection`) doesn't interrupt mid-call.
-  Accepted: identical to today's stop-flag semantics (invariant 4). Document per call site.
+  Accepted: identical to today's stop-flag semantics (invariant 4). Rule for Phases 2–3: every
+  blocking call site either polls `ensureActive()` at the same points the old stop flags were
+  checked, or carries an explicit `// not cancellable mid-call` comment — otherwise implementers
+  will assume `cancel()` interrupts the call and ship silent non-cancellation.
 - **Hidden sequencing dependencies** on the single `io` thread beyond repo work. Mitigation:
   Phase 2 initially routes *everything* through `repoDispatcher` (behavior-identical), then moves
   network/read-only work to parallel IO one launch site at a time.
