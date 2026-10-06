@@ -58,8 +58,8 @@ object AppState {
     var gitDetail: String? = null
     var gitMessageClear = false
 
-    private val logBuffer = StringBuilder()
-    private val buildBuffer = StringBuilder()
+    private val logBuffer = BoundedLog()
+    private val buildBuffer = BoundedLog()
     private var ready = false
 
     fun isReady(): Boolean = ready
@@ -86,11 +86,7 @@ object AppState {
 
     fun loadWorkspaceBuild() {
         lastApk = ApkLibrary.list(appContext).firstOrNull()?.absolutePath
-        val log = BuildHistory.latestLog()
-        synchronized(buildBuffer) {
-            buildBuffer.setLength(0)
-            buildBuffer.append(log.takeLast(80_000))
-        }
+        buildBuffer.replace(BuildHistory.latestLog())
         UiBridge.buildUpdate()
     }
 
@@ -133,42 +129,30 @@ object AppState {
         return file
     }
 
-    fun text(): String = synchronized(logBuffer) { logBuffer.toString() }
+    fun text(): String = logBuffer.text()
 
     fun log(line: String) {
-        val text = line.trimEnd()
-        synchronized(logBuffer) {
-            logBuffer.append(text).append('\n')
-            if (logBuffer.length > 120_000) {
-                logBuffer.delete(0, logBuffer.length - 80_000)
-            }
-        }
+        val text = logBuffer.append(line)
         UiBridge.updateLog()
         DebugLog.step("console", text)
     }
 
     fun clear() {
-        synchronized(logBuffer) { logBuffer.setLength(0) }
+        logBuffer.clear()
         DebugLog.step("console", "cleared")
         UiBridge.updateLog()
     }
 
-    fun buildText(): String = synchronized(buildBuffer) { buildBuffer.toString() }
+    fun buildText(): String = buildBuffer.text()
 
     fun clearBuild() {
-        synchronized(buildBuffer) { buildBuffer.setLength(0) }
+        buildBuffer.clear()
         DebugLog.step("build", "cleared")
         UiBridge.buildUpdate()
     }
 
     fun buildLog(line: String) {
-        val text = line.trimEnd()
-        synchronized(buildBuffer) {
-            buildBuffer.append(text).append('\n')
-            if (buildBuffer.length > 120_000) {
-                buildBuffer.delete(0, buildBuffer.length - 80_000)
-            }
-        }
+        val text = buildBuffer.append(line)
         UiBridge.buildUpdate()
         DebugLog.step("build", text)
     }
