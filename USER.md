@@ -7,7 +7,7 @@ layouts) where they were stated — those are requirements, not decoration.
 
 ## Vision
 
-A full vibe-coding IDE on an Android phone — "my magnus opus of vibe coding." The core loop:
+A full Android IDE on an Android phone cenhanced with Ai features and controllable by an agent. The core loop:
 find or clone a FOSS repo, modify it with an on-device coding agent using your own model API
 keys (OpenAI, Anthropic, Gemini, Grok, OpenRouter, or custom), then compile, test, and install
 the result — good enough that the apps it builds become daily drivers. The feel: "classic
@@ -51,7 +51,7 @@ These were stated as corrections or emphatic decisions — treat them as constra
 - The Vibe tab explicitly shows which repo the agent is modifying.
 - I can @mention another project in the prompt, Cursor-style, rendered as a tag in the text area.
 - I can review and load old chats per workspace.
-- I can view and edit every system prompt the app uses, at any time.
+- I can view and edit every system prompt the app uses in settings
 - Send becomes Stop while the agent works.
 
 ### Build
@@ -63,7 +63,6 @@ These were stated as corrections or emphatic decisions — treat them as constra
 - Saved APKs are listed and installable later.
 - A security scan step checks built APKs (VirusTotal API now; MobSF-in-docker on Cloud Run is
   on the todo list).
-- The build screen should look good — it was called out as ugly.
 
 ### Git
 - As a user, I get VS Code-grade version control: commit list for the current branch, changed

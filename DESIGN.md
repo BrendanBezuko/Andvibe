@@ -20,7 +20,8 @@ Status: proposed · Scope: `app/` module · Companion: the extraction pattern pr
   stays; per-tab Compose becomes *possible* afterwards because each tab will own its state.
 - No Gradle module split up front. Package boundaries first; a `:core` module extraction is a
   cheap follow-up once packages are clean.
-- No feature changes, no visual redesign.
+- No feature changes, no visual redesign. The current look is the contract — tokens and rules
+  are documented in `STYLE.md`.
 
 ## 2. Diagnosis (what we're fixing)
 
@@ -385,8 +386,10 @@ class AgentRun(val events: Flow<AgentEvent>, private val task: TaskRunner.Task) 
   (`ProjectStore` restores the last project, `ChatStore` the conversation, `BuildHistory` the
   last build log) and loses the rest. The contract here is **parity, made explicit**: every
   feature must initialize its state from its store, never assume a warm start. Restoring purely
-  transient UI (active tab, open editor file, unsent draft) via `SavedStateHandle`/Bundle is a
-  deliberate non-goal for the rebuild — worth revisiting in Phase 6 if it bites.
+  transient UI (active tab, open editor file) via `SavedStateHandle`/Bundle is a deliberate
+  non-goal for the rebuild. One cheap exception: **unsent draft text** (Vibe prompt, commit
+  message) is a daily papercut worth persisting via the existing stores — do it when touching
+  those features in Phase 4, not with `SavedStateHandle` machinery.
 
 ### 3.9 Vocabulary
 
@@ -464,6 +467,9 @@ by the Build tab and the agent). Restructure `agent/`: `AgentLoop` as a suspend 
 and the `AgentEvent` stream replacing `onStep` + the direct `UiBridge` calls. The `cloud_build`
 tool switches to `BuildService` (the `buildBusy` race dies here). The Vibe UI is *not* migrated
 yet — MainActivity temporarily adapts the event stream to its existing render calls.
+**Dual-path budget:** that adapter is *one file*, it adds no new `UiBridge` callbacks, and it is
+deleted in the same change that lands `VibeFeature` (Phase 4 step 6). Temporary bridges that
+outlive their phase become a second architecture.
 *Exit:* `agent/` has no `AppState`/`UiBridge` references; tool and model-adapter JVM tests exist;
 one build path; agent cancellable via its task.
 
@@ -484,7 +490,10 @@ collection, write JVM tests for the feature's state transitions, then move the r
 into a page controller. The corresponding `AppState` fields are deleted at the end of each step
 (see §6).
 *Exit per tab:* no `AppState` field for that tab remains; its `UiBridge` callback is gone; the
-feature has state-transition tests.
+feature has state-transition tests; **every non-UI reader of the deleted fields (`DebugMcp`,
+`Notify`) is re-pointed at the feature in the same step** — MCP stays green through the whole
+strangler, not just after Phase 5; and the per-tab smoke pass (open → main action → rotate →
+background → notification → MCP responds) is run.
 
 **Phase 5 — Shell cleanup.**
 Delete `AppState` and `UiBridge` (by now empty except `ScreenshotSource`). `DebugMcp` re-pointed
