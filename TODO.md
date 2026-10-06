@@ -2,7 +2,7 @@
 - 
 
 ## Must Have
-- I want an easy way to fork repos
+- I want an easy way to fork repos and work privately from a remote
 
 ## Should have:
 - gitleaks or some other tool if you're pushing live repos

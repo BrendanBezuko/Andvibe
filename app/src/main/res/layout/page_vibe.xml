@@ -132,7 +132,7 @@
                     android:layout_weight="1"
                     android:background="@drawable/bg_field"
                     android:gravity="top|start"
-                    android:hint="Message"
+                    android:hint="Message · @ to reference"
                     android:imeOptions="actionSend"
                     android:importantForAutofill="no"
                     android:inputType="textMultiLine|textCapSentences"
@@ -144,10 +144,23 @@
                     android:textSize="15sp" />
 
                 <Button
+                    android:id="@+id/vibeMention"
+                    style="?attr/borderlessButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:minWidth="40dp"
+                    android:minHeight="40dp"
+                    android:text="@"
+                    android:textColor="@color/accent"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <Button
                     android:id="@+id/vibeSend"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
+                    android:layout_marginStart="4dp"
                     android:text="Send" />
             </LinearLayout>
         </LinearLayout>

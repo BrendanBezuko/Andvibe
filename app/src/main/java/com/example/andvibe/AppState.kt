@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 object AppState {
-    enum class Tab { CONSOLE, BOARD, FILES, SEARCH, GIT, VIBE, BUILD }
+    enum class Tab { CONSOLE, BOARD, FILES, SEARCH, GIT, VIBE, UNDERSTAND, BUILD }
 
     val io = Executors.newSingleThreadExecutor()
     val agentIo = Executors.newSingleThreadExecutor()
@@ -32,6 +32,11 @@ object AppState {
     @Volatile var vibeRepo: File? = null
     var vibeResult = ""
     var writtenPaths: List<String> = emptyList()
+    @Volatile var understandBusy = false
+    @Volatile var understandRepo: File? = null
+    val understandStop = AtomicBoolean(false)
+    var understandText = ""
+    var understandNote = ""
     @Volatile var feedBusy = false
     @Volatile var findBusy = false
     var findHits: List<FossSearch.RepoHit> = emptyList()
@@ -86,7 +91,7 @@ object AppState {
         UiBridge.buildUpdate()
     }
 
-    fun workBusy(): Boolean = vibeBusy || buildBusy || reviseBusy
+    fun workBusy(): Boolean = vibeBusy || buildBusy || reviseBusy || understandBusy
 
     fun fitWorkspace(toRoot: Boolean = false): Boolean {
         if (!toRoot && WorkspaceStore.contains(cwd)) return false
@@ -151,6 +156,7 @@ object UiBridge {
         fun onOpen(file: File)
         fun onPreview(file: File)
         fun onVibe()
+        fun onUnderstand()
         fun onBuild()
         fun onGit()
         fun onProject()
@@ -180,6 +186,10 @@ object UiBridge {
 
     fun vibeUpdate() {
         main.post { listener?.onVibe() }
+    }
+
+    fun understandUpdate() {
+        main.post { listener?.onUnderstand() }
     }
 
     fun buildUpdate() {

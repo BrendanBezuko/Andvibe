@@ -6,7 +6,7 @@
 
 AndVibe is an Android app for cloning a repo, editing it with your own model key, and building it. JavaScript and HTML run on the phone. A project with `gradlew` is compiled on Cloud Run.
 
-The app has five tabs: Console, Files, Git, Vibe, and Build. Console also opens Settings, which shows whether the debug log server is listening.
+The app has these tabs: Console, Board, Search, Files, Understand, Vibe, Build, and Git. Console also opens Settings, which shows whether the debug log server is listening.
 
 ## Install AndVibe
 
@@ -74,6 +74,12 @@ The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or
 **Account** stores the git name, email, and an HTTPS token with the other secrets. GitHub wants a personal access token, not the account password.
 
 Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a file, or Stage all, then Commit. Message asks the model for a subject and does not commit. The commit list is the history of the current branch. Name, email, HTTPS token, SSH key, and this project's origin are in Settings.
+
+## Understand
+
+Open a project, then open the Understand tab (brain icon). Optionally type a focus, such as the agent loop or the build path. Tap **Understand**.
+
+The phone scans the repo for function and method signatures, packs a file tree and a few key file heads, and asks the model selected on the Vibe tab for an overview, a Mermaid flow diagram, and a Mermaid sequence diagram. The scanned function defs are appended to the markdown. Keys stay on the phone. Tap **Save** to write `UNDERSTAND.md` in the repo root. If that file already exists, the tab loads it when you open the project.
 
 ## Vibe
 

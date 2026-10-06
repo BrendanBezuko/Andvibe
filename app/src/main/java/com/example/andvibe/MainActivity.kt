@@ -13,9 +13,11 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.Editable
 import android.text.InputType
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.TextWatcher
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.PixelCopy
@@ -26,7 +28,9 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ListPopupWindow
 import android.widget.TextView
+import androidx.core.graphics.ColorUtils
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -63,6 +67,18 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private val apiKeys = linkedMapOf<Provider, EditText>()
     private var settingsOpen = false
     private var workspaceOpen = false
+    private var mentionPopup: ListPopupWindow? = null
+    private var mentionEditing = false
+    private val mentionNames = mutableListOf<String>()
+    private val mentionWatcher = object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+        override fun afterTextChanged(s: Editable?) {
+            if (mentionEditing || s == null) return
+            refreshMentionSpans(s)
+            updateMentionPopup()
+        }
+    }
 
     private val openFolder = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode != RESULT_OK) return@registerForActivityResult
@@ -132,6 +148,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         setupSearch()
         setupGit()
         setupVibe()
+        setupUnderstand()
         setupBuild()
         setupNav()
         setupUsage()
@@ -139,6 +156,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         if (open != null && open.isFile) openEditor(open) else refreshFileList()
         onLog()
         onVibe()
+        onUnderstand()
         onBuild()
         onGit()
         openTabFrom(intent)
@@ -291,6 +309,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
     }
 
+    override fun onUnderstand() {
+        if (!::binding.isInitialized) return
+        renderUnderstand()
+    }
+
     override fun onBuild() {
         renderSavedApks()
         renderBuildHistory()
@@ -403,6 +426,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         if (!::binding.isInitialized) return
         val ws = WorkspaceStore.current()
         binding.openWorkspace.text = ws.name
+        paintProject()
         binding.usageTokens.text = (ws.inputTokens + ws.outputTokens).toString()
         binding.usagePrice.text = WorkspaceStore.priceText(ws.costMicros)
         if (AppState.tab == AppState.Tab.BOARD) renderBoard()
@@ -410,6 +434,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             renderChat()
             renderHistory()
         }
+    }
+
+    private fun paintProject() {
+        if (!::binding.isInitialized) return
+        val name = runCatching { AppState.projectRoot().name }.getOrNull()
+        binding.openProject.text = name ?: "—"
+        binding.openProject.setTextColor(getColor(if (name == null) R.color.muted else R.color.accent))
     }
 
     override fun onScreenshot(tab: AppState.Tab?, done: (Bitmap?) -> Unit) {
@@ -453,8 +484,15 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         refreshFileList()
         if (AppState.tab == AppState.Tab.GIT) refreshGit() else onGit()
         if (AppState.tab == AppState.Tab.BUILD) onBuild()
+        if (!AppState.understandBusy) {
+            AppState.understandText = ""
+            AppState.understandNote = ""
+            maybeLoadUnderstandDoc()
+        }
+        if (AppState.tab == AppState.Tab.UNDERSTAND) onUnderstand() else renderUnderstandRepo()
         renderVibeRepo()
         paintTape()
+        paintProject()
         if (workspaceOpen) renderRepoChecks()
     }
 
@@ -614,6 +652,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.openWorkspaceBox.setOnClickListener {
             if (workspaceOpen) closeWorkspace() else openWorkspace()
         }
+        binding.openProjectBox.setOnClickListener { showProjects() }
         binding.workspacePage.saveWorkspace.setOnClickListener {
             saveWorkspaceName()
             onUsage()
@@ -1362,6 +1401,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.vibePage.vibeSend.setOnClickListener { sendVibe() }
         binding.vibePage.vibeRepoPick.setOnClickListener { pickVibeRepo() }
         binding.vibePage.vibeRepoBar.setOnClickListener { pickVibeRepo() }
+        binding.vibePage.vibeMention.setOnClickListener { openMentionPicker(force = true) }
+        binding.vibePage.vibePrompt.addTextChangedListener(mentionWatcher)
         binding.vibePage.newChat.setOnClickListener {
             if (AppState.vibeBusy) return@setOnClickListener
             ChatStore.startNew()
@@ -1383,6 +1424,125 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         })
     }
 
+    private fun mentionColors(): Triple<Int, Int, Int> {
+        val accent = getColor(R.color.accent)
+        val fill = ColorUtils.setAlphaComponent(accent, 0x2A)
+        return Triple(fill, accent, accent)
+    }
+
+    private fun refreshMentionSpans(text: Editable) {
+        val known = WorkspaceStore.activeRepos().map { it.name }
+        val (fill, stroke, color) = mentionColors()
+        mentionEditing = true
+        try {
+            ProjectMentions.applySpans(text, known, fill, stroke, color)
+        } finally {
+            mentionEditing = false
+        }
+    }
+
+    private fun updateMentionPopup() {
+        val prompt = binding.vibePage.vibePrompt
+        val query = ProjectMentions.atQuery(prompt.text ?: "", prompt.selectionStart)
+        if (query == null) {
+            mentionPopup?.dismiss()
+            return
+        }
+        showMentionChoices(query.query, query.start, query.start + 1 + query.query.length)
+    }
+
+    private fun openMentionPicker(force: Boolean) {
+        if (AppState.vibeBusy) return
+        val others = ProjectMentions.filterRepos(
+            WorkspaceStore.activeRepos(),
+            "",
+            exclude = vibeRoot()?.name
+        )
+        if (others.isEmpty()) {
+            if (WorkspaceStore.activeRepos().isEmpty()) openWorkspace()
+            else AppState.log("No other projects in this workspace to reference")
+            return
+        }
+        if (!force) {
+            updateMentionPopup()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Reference project")
+            .setItems(others.map { it.name }.toTypedArray()) { _, which ->
+                val prompt = binding.vibePage.vibePrompt
+                val cursor = prompt.selectionStart.coerceAtLeast(0)
+                val q = ProjectMentions.atQuery(prompt.text ?: "", cursor)
+                if (q != null) {
+                    insertMention(others[which].name, q.start, cursor)
+                } else {
+                    insertMention(others[which].name, cursor, cursor)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showMentionChoices(filter: String, replaceStart: Int, replaceEnd: Int) {
+        val dirs = ProjectMentions.filterRepos(
+            WorkspaceStore.activeRepos(),
+            filter,
+            exclude = vibeRoot()?.name
+        )
+        if (dirs.isEmpty()) {
+            mentionPopup?.dismiss()
+            return
+        }
+        mentionNames.clear()
+        mentionNames.addAll(dirs.map { it.name })
+        val prompt = binding.vibePage.vibePrompt
+        val popup = mentionPopup ?: ListPopupWindow(this).also {
+            it.anchorView = prompt
+            it.isModal = false
+            mentionPopup = it
+        }
+        popup.setAdapter(
+            ArrayAdapter(this, android.R.layout.simple_list_item_1, mentionNames)
+        )
+        popup.setOnItemClickListener { _, _, position, _ ->
+            val name = mentionNames.getOrNull(position) ?: return@setOnItemClickListener
+            val q = ProjectMentions.atQuery(prompt.text ?: "", prompt.selectionStart)
+            val start = q?.start ?: replaceStart
+            val end = prompt.selectionStart.coerceAtLeast(start)
+            insertMention(name, start, end)
+        }
+        popup.width = prompt.width.coerceAtLeast(280)
+        popup.height = ListPopupWindow.WRAP_CONTENT
+        if (!popup.isShowing) popup.show()
+    }
+
+    private fun insertMention(name: String, replaceStart: Int, replaceEnd: Int) {
+        mentionPopup?.dismiss()
+        val prompt = binding.vibePage.vibePrompt
+        val known = WorkspaceStore.activeRepos().map { it.name }
+        val (fill, stroke, color) = mentionColors()
+        mentionEditing = true
+        try {
+            val (spanned, cursor) = ProjectMentions.insert(
+                prompt.text ?: "",
+                replaceStart,
+                replaceEnd,
+                name,
+                known,
+                fill,
+                stroke,
+                color
+            )
+            prompt.removeTextChangedListener(mentionWatcher)
+            prompt.setText(spanned)
+            prompt.setSelection(cursor.coerceIn(0, spanned.length))
+            prompt.addTextChangedListener(mentionWatcher)
+        } finally {
+            mentionEditing = false
+        }
+        prompt.requestFocus()
+    }
+
     private fun vibeRoot(): File? {
         val open = runCatching { AppState.projectRoot() }.getOrNull()
         if (open != null && WorkspaceStore.contains(open)) return open
@@ -1396,7 +1556,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         page.vibeRepo.setTextColor(getColor(if (repo == null) R.color.muted else R.color.accent))
         page.vibeRepoPick.isEnabled = !AppState.vibeBusy
         page.vibeRepoBar.isEnabled = !AppState.vibeBusy
-        page.vibePrompt.hint = if (repo == null) "Pick a repo, or ask for a new project" else "Message ${repo.name}"
+        page.vibeMention.isEnabled = !AppState.vibeBusy
+        page.vibePrompt.hint = if (repo == null) {
+            "Pick a project, or ask for a new one · @ to reference"
+        } else {
+            "Message ${repo.name} · @ to reference"
+        }
     }
 
     private fun pickVibeRepo() {
@@ -1416,6 +1581,201 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             .setNeutralButton("Edit repos") { _, _ -> openWorkspace() }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun setupUnderstand() {
+        val page = binding.understandPage
+        page.understandRun.setOnClickListener { runUnderstand() }
+        page.understandSave.setOnClickListener { saveUnderstand() }
+        page.understandRepoPick.setOnClickListener { pickUnderstandRepo() }
+        page.understandRepoBar.setOnClickListener { pickUnderstandRepo() }
+        maybeLoadUnderstandDoc()
+    }
+
+    private fun renderUnderstandRepo() {
+        val page = binding.understandPage
+        val repo = if (AppState.understandBusy) AppState.understandRepo else vibeRoot()
+        page.understandRepo.text = repo?.name ?: "No repo selected"
+        page.understandRepo.setTextColor(getColor(if (repo == null) R.color.muted else R.color.accent))
+        page.understandRepoPick.isEnabled = !AppState.understandBusy
+        page.understandRepoBar.isEnabled = !AppState.understandBusy
+    }
+
+    private fun pickUnderstandRepo() {
+        if (AppState.understandBusy) return
+        val dirs = WorkspaceStore.activeRepos()
+        if (dirs.isEmpty()) {
+            openWorkspace()
+            return
+        }
+        val current = vibeRoot()?.name
+        AlertDialog.Builder(this)
+            .setTitle("Repo to understand")
+            .setSingleChoiceItems(dirs.map { it.name }.toTypedArray(), dirs.indexOfFirst { it.name == current }) { dialog, which ->
+                dialog.dismiss()
+                if (dirs[which].name != current) {
+                    openProject(dirs[which])
+                    AppState.understandText = ""
+                    AppState.understandNote = ""
+                    maybeLoadUnderstandDoc()
+                    renderUnderstand()
+                }
+            }
+            .setNeutralButton("Edit repos") { _, _ -> openWorkspace() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun maybeLoadUnderstandDoc() {
+        if (AppState.understandBusy || AppState.understandText.isNotBlank()) return
+        val root = vibeRoot() ?: return
+        val saved = Understand.loadSaved(root) ?: return
+        AppState.understandText = saved
+        AppState.understandNote = "Loaded UNDERSTAND.md"
+    }
+
+    private fun renderUnderstand() {
+        val page = binding.understandPage
+        renderUnderstandRepo()
+        val text = AppState.understandText
+        val has = text.isNotBlank()
+        page.understandOut.text = text
+        page.understandOut.visibility = if (has) View.VISIBLE else View.GONE
+        page.understandEmpty.visibility = if (has) View.GONE else View.VISIBLE
+        page.understandSave.isEnabled = has && !AppState.understandBusy
+        page.understandFocus.isEnabled = !AppState.understandBusy
+        when {
+            !AppState.understandBusy -> {
+                page.understandRun.isEnabled = true
+                page.understandRun.text = "Understand"
+                page.understandStatus.text = when {
+                    AppState.understandNote.isNotBlank() -> "● ${AppState.understandNote.uppercase(Locale.US)}"
+                    has -> "● READY"
+                    else -> "● READY"
+                }
+                page.understandStatus.setTextColor(
+                    getColor(if (AppState.understandNote.contains("fail", true) ||
+                        AppState.understandNote.contains("error", true)
+                    ) R.color.quote else R.color.muted)
+                )
+            }
+            AppState.understandStop.get() -> {
+                page.understandRun.isEnabled = false
+                page.understandRun.text = "Stopping…"
+                page.understandStatus.text = "● STOPPING"
+                page.understandStatus.setTextColor(getColor(R.color.quote))
+            }
+            else -> {
+                page.understandRun.isEnabled = true
+                page.understandRun.text = "Stop"
+                page.understandStatus.text = "● ${AppState.understandNote.ifBlank { "WORKING" }.uppercase(Locale.US)}"
+                page.understandStatus.setTextColor(getColor(R.color.accent))
+            }
+        }
+    }
+
+    private fun runUnderstand() {
+        if (AppState.understandBusy) {
+            AppState.understandStop.set(true)
+            AppState.understandNote = "Stopping after this step"
+            UiBridge.understandUpdate()
+            return
+        }
+        val root = vibeRoot()
+        if (root == null) {
+            pickUnderstandRepo()
+            return
+        }
+        if (runCatching { AppState.projectRoot() }.getOrNull()?.canonicalFile != root.canonicalFile) {
+            openProject(root)
+        }
+        saveEditor(announce = false)
+        saveProvider(currentProvider)
+        val provider = currentProvider
+        val key = store.get(provider, "key", "")
+        val model = store.get(provider, "model", provider.defaultModel).ifBlank {
+            binding.vibePage.model.text?.toString()?.trim().orEmpty().ifBlank { provider.defaultModel }
+        }
+        val base = store.get(provider, "base", provider.defaultBase).ifBlank {
+            binding.vibePage.baseUrl.text?.toString()?.trim().orEmpty().ifBlank { provider.defaultBase }
+        }
+        if (key.isBlank() || model.isBlank()) {
+            AppState.understandNote = "Add an API key in Settings"
+            AppState.log("understand: add an API key in Settings")
+            renderUnderstand()
+            return
+        }
+        val focus = binding.understandPage.understandFocus.text?.toString()?.trim().orEmpty()
+        AppState.understandBusy = true
+        AppState.understandRepo = root
+        AppState.understandStop.set(false)
+        AppState.understandNote = "Starting"
+        AppState.understandText = ""
+        UiBridge.understandUpdate()
+        val job = startJob("Understanding ${root.name}", AppState.Tab.UNDERSTAND)
+        AppState.io.execute {
+            var title = "Understand failed"
+            var summary = ""
+            try {
+                DebugLog.step("understand", "start provider=${provider.id} model=$model")
+                val result = Understand.run(
+                    root, focus, provider, key, model, base, AppState.understandStop
+                ) { line ->
+                    AppState.understandNote = line
+                    DebugLog.step("understand", line)
+                    UiBridge.understandUpdate()
+                }
+                AppState.understandText = result.markdown
+                AppState.understandNote = "${result.defs} defs · ${result.files} files"
+                summary = "Documented ${root.name}: ${result.defs} defs in ${result.files} files"
+                AppState.log(summary)
+                DebugLog.step("understand", "done defs=${result.defs} files=${result.files}")
+                title = if (AppState.understandStop.get()) "Understand stopped" else "Understand finished"
+            } catch (t: Throwable) {
+                val msg = t.message ?: t.javaClass.simpleName
+                AppState.understandNote = msg
+                if (AppState.understandText.isBlank()) {
+                    AppState.understandText = "Understand failed: $msg"
+                }
+                summary = msg
+                DebugLog.step("understand", "fail ${t.javaClass.simpleName}: $msg")
+                AppState.log("understand error: $msg")
+            } finally {
+                AppState.understandBusy = false
+                AppState.understandStop.set(false)
+                UiBridge.understandUpdate()
+                Jobs.end(job, title, summary)
+            }
+        }
+    }
+
+    private fun saveUnderstand() {
+        val root = vibeRoot() ?: run {
+            pickUnderstandRepo()
+            return
+        }
+        val text = AppState.understandText
+        if (text.isBlank()) {
+            AppState.understandNote = "Nothing to save yet"
+            renderUnderstand()
+            return
+        }
+        try {
+            val file = Understand.save(root, text)
+            AppState.understandNote = "Saved ${file.name}"
+            AppState.log("wrote ${RepoFiles.rel(file, root)}")
+            if (!editing) refreshFileList()
+            if (!AppState.gitBusy) {
+                AppState.gitSnapshot = runCatching {
+                    GitOps.snapshot(AppState.cwd, AppState.reposDir)
+                }.getOrNull()
+                UiBridge.gitUpdate()
+            }
+            UiBridge.filesChanged()
+        } catch (t: Throwable) {
+            AppState.understandNote = t.message ?: t.javaClass.simpleName
+        }
+        renderUnderstand()
     }
 
     private fun showVibeTab(index: Int) {
@@ -1946,6 +2306,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         when (tab) {
             AppState.Tab.BOARD -> renderBoard()
             AppState.Tab.BUILD -> onBuild()
+            AppState.Tab.UNDERSTAND -> onUnderstand()
             AppState.Tab.SEARCH -> {
                 renderFind()
                 ensureFossFeed()
@@ -1978,6 +2339,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.Tab.SEARCH -> R.id.nav_search
         AppState.Tab.GIT -> R.id.nav_git
         AppState.Tab.VIBE -> R.id.nav_vibe
+        AppState.Tab.UNDERSTAND -> R.id.nav_understand
         AppState.Tab.BUILD -> R.id.nav_build
         AppState.Tab.CONSOLE -> null
     }
@@ -1990,6 +2352,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.searchPage.root.visibility = if (tab == AppState.Tab.SEARCH) View.VISIBLE else View.GONE
         binding.gitPage.root.visibility = if (tab == AppState.Tab.GIT) View.VISIBLE else View.GONE
         binding.vibePage.root.visibility = if (tab == AppState.Tab.VIBE) View.VISIBLE else View.GONE
+        binding.understandPage.root.visibility = if (tab == AppState.Tab.UNDERSTAND) View.VISIBLE else View.GONE
         binding.buildPage.root.visibility = if (tab == AppState.Tab.BUILD) View.VISIBLE else View.GONE
     }
 
@@ -2343,7 +2706,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             return
         }
         AlertDialog.Builder(this)
-            .setTitle(WorkspaceStore.current().name)
+            .setTitle("Open project")
             .setItems(dirs.map { it.name }.toTypedArray()) { _, which -> openProject(dirs[which]) }
             .setNeutralButton("Edit repos") { _, _ -> openWorkspace() }
             .setNegativeButton("Cancel", null)
@@ -2362,6 +2725,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.log("opened ${dir.name}")
         renderVibeRepo()
         paintTape()
+        paintProject()
         if (workspaceOpen) renderRepoChecks()
     }
 

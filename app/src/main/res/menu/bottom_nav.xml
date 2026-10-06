@@ -13,6 +13,10 @@
         android:icon="@drawable/ic_nav_files"
         android:title="Files" />
     <item
+        android:id="@+id/nav_understand"
+        android:icon="@drawable/ic_nav_understand"
+        android:title="Understand" />
+    <item
         android:id="@+id/nav_vibe"
         android:icon="@drawable/ic_nav_vibe"
         android:title="Vibe" />

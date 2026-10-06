@@ -16,7 +16,7 @@ class AgentContext(
 
     val repo: File
         get() = root ?: error(
-            "no repo is selected. Ask the user to pick one at the top of the Vibe tab, " +
+            "no repo is selected. Ask the user to pick one in the bottom PROJECT bar, " +
                 "or call create_project if they asked for a new project."
         )
 }

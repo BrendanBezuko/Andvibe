@@ -31,7 +31,8 @@ object Agent {
         Which code to change:
         - Work on the existing code in the selected repo. Fix, extend, or refactor what is already there. Do not rewrite the project from scratch, scaffold a separate app, or put new work in a new folder.
         - Only call create_project when the user explicitly asks for a new project, app, or repo. If the request could go either way, change the existing repo.
-        - If no repo is selected and the user did not ask for a new project, do not create one. Reply asking them to pick a repo at the top of the Vibe tab.
+        - If no repo is selected and the user did not ask for a new project, do not create one. Reply asking them to pick a project in the bottom bar.
+        - The user may @mention other workspace repos for reference. Use that read-only context when they do. Do not edit those repos; tools only change the selected project.
 
         How to work:
         - Explore before you edit. Use grep and list_dir to find the code, and read_file to read it. Do not guess at file contents.
@@ -131,7 +132,9 @@ object Agent {
 
     private fun firstMessage(job: AgentJob): String {
         val root = job.ctx.root
-        val others = WorkspaceStore.activeRepos().map { it.name }.filter { it != root?.name }
+        val active = WorkspaceStore.activeRepos()
+        val others = active.map { it.name }.filter { it != root?.name }
+        val refs = ProjectMentions.dirsIn(job.task, active).filter { it.canonicalFile != root?.canonicalFile }
         return buildString {
             if (root == null) {
                 append("Repo: none selected\n")
@@ -144,7 +147,8 @@ object Agent {
                 append("Gradle wrapper: ").append(if (File(root, "gradlew").isFile) "yes, cloud_build works" else "no").append('\n')
             }
             if (others.isNotEmpty()) {
-                append("Other repos in this workspace (not reachable by tools): ").append(others.joinToString(", ")).append('\n')
+                append("Other repos in this workspace (reference with @name; tools cannot edit them): ")
+                    .append(others.joinToString(", ")).append('\n')
             }
             if (root != null) {
                 append("\nFile tree (partial):\n").append(AiClient.tree(root, 150)).append("\n\n")
@@ -160,6 +164,9 @@ object Agent {
                 }
             } else {
                 append('\n')
+            }
+            for (ref in refs) {
+                append(ProjectMentions.contextBlock(ref))
             }
             if (job.earlier.isNotEmpty()) {
                 append("Earlier in this chat:\n")

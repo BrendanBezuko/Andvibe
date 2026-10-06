@@ -87,9 +87,10 @@ object AiClient {
         provider: Provider,
         key: String,
         model: String,
-        base: String
+        base: String,
+        maxUser: Int = 16_000
     ): String {
-        if (user.length > 16_000) error("prompt is too long")
+        if (user.length > maxUser) error("prompt is too long")
         if (key.isBlank()) error("add an API key in Settings")
         if (model.isBlank()) error("set a model name")
         if (model.any { it.isWhitespace() }) error("model name has a space")
@@ -149,6 +150,8 @@ object AiClient {
 
     private fun buildPrompt(root: File, cwd: File, open: File?, instruction: String): String {
         val files = chooseFiles(root, open)
+        val refs = ProjectMentions.dirsIn(instruction, WorkspaceStore.activeRepos())
+            .filter { it.canonicalFile != root.canonicalFile }
         return buildString {
             append("Repo: ").append(root.name).append('\n')
             append("Working directory: ").append(RepoFiles.rel(cwd, root).ifBlank { "." }).append('\n')
@@ -169,6 +172,9 @@ object AiClient {
                     append("----- END FILE -----\n")
                 }
                 append('\n')
+            }
+            for (ref in refs) {
+                append(ProjectMentions.contextBlock(ref))
             }
             append("Instruction:\n")
             append(instruction)

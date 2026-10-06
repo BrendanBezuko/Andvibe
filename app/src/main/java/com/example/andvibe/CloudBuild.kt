@@ -64,15 +64,22 @@ object CloudBuild {
         if (dest.exists()) dest.delete()
         var count = 0
         var skipped = 0
+        val seen = HashSet<String>()
+        val prefix = root.path.trimEnd(File.separatorChar) + File.separator
         ZipOutputStream(dest.outputStream().buffered()).use { zip ->
             RepoFiles.walk(root) { file ->
                 if (file.name == "local.properties") {
                     DebugLog.step("cloud.zip", "skip local.properties")
                     return@walk
                 }
-                val rel = RepoFiles.rel(file, root)
+                // Symlinks resolve to their target, so name entries by the walked path.
+                val rel = file.path.removePrefix(prefix).replace(File.separatorChar, '/')
                 if (rel.isBlank() || rel.split('/').any { it == ".." || it.isBlank() }) {
                     DebugLog.step("cloud.zip", "skip unsafe $rel")
+                    return@walk
+                }
+                if (!seen.add(rel)) {
+                    DebugLog.step("cloud.zip", "skip duplicate $rel")
                     return@walk
                 }
                 if (file.length() > MAX_FILE) {

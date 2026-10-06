@@ -134,6 +134,7 @@ object Notify {
     private fun icon(tab: AppState.Tab?): Int = when (tab) {
         AppState.Tab.BUILD -> R.drawable.ic_nav_build
         AppState.Tab.VIBE -> R.drawable.ic_nav_vibe
+        AppState.Tab.UNDERSTAND -> R.drawable.ic_nav_understand
         AppState.Tab.GIT -> R.drawable.ic_nav_git
         AppState.Tab.FILES -> R.drawable.ic_nav_files
         AppState.Tab.SEARCH -> R.drawable.ic_nav_search
