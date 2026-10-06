@@ -6,7 +6,21 @@ import java.io.ByteArrayInputStream
 object UnderstandDoc {
     const val HOST = "andvibe.understand"
 
-    fun page(markdown: String): String {
+    data class Palette(
+        val bg: String,
+        val panel: String,
+        val raised: String,
+        val ink: String,
+        val muted: String,
+        val accent: String,
+        val line: String,
+        val code: String,
+        val ask: String,
+        val quote: String,
+        val bid: String,
+    )
+
+    fun page(markdown: String, palette: Palette): String {
         val body = toHtml(markdown)
         return """
             <!DOCTYPE html>
@@ -16,13 +30,14 @@ object UnderstandDoc {
               <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=3"/>
               <style>
                 :root {
-                  --bg: #0D1117;
-                  --panel: #161B22;
-                  --ink: #E6EDF3;
-                  --muted: #8B949E;
-                  --accent: #58A6FF;
-                  --line: #30363D;
-                  --code: #010409;
+                  --bg: ${palette.bg};
+                  --panel: ${palette.panel};
+                  --raised: ${palette.raised};
+                  --ink: ${palette.ink};
+                  --muted: ${palette.muted};
+                  --accent: ${palette.accent};
+                  --line: ${palette.line};
+                  --code: ${palette.code};
                 }
                 html, body {
                   margin: 0;
@@ -89,7 +104,7 @@ object UnderstandDoc {
                 }
                 strong { font-weight: 600; }
                 .err {
-                  color: #F85149;
+                  color: ${palette.ask};
                   font-family: ui-monospace, monospace;
                   font-size: 0.85em;
                   white-space: pre-wrap;
@@ -115,55 +130,55 @@ object UnderstandDoc {
                   },
                   themeVariables: {
                     darkMode: true,
-                    background: '#0D1117',
-                    primaryColor: '#161B22',
-                    primaryTextColor: '#E6EDF3',
-                    primaryBorderColor: '#58A6FF',
-                    secondaryColor: '#21262D',
-                    tertiaryColor: '#0D1117',
-                    lineColor: '#8B949E',
-                    textColor: '#E6EDF3',
-                    mainBkg: '#161B22',
-                    nodeBorder: '#58A6FF',
-                    clusterBkg: '#161B22',
-                    clusterBorder: '#30363D',
-                    titleColor: '#E6EDF3',
-                    edgeLabelBackground: '#0D1117',
-                    actorBkg: '#161B22',
-                    actorBorder: '#58A6FF',
-                    actorTextColor: '#E6EDF3',
-                    actorLineColor: '#30363D',
-                    signalColor: '#E6EDF3',
-                    signalTextColor: '#E6EDF3',
-                    labelBoxBkgColor: '#161B22',
-                    labelBoxBorderColor: '#30363D',
-                    labelTextColor: '#E6EDF3',
-                    loopTextColor: '#E6EDF3',
-                    noteBkgColor: '#21262D',
-                    noteTextColor: '#E6EDF3',
-                    noteBorderColor: '#30363D',
-                    activationBkgColor: '#21262D',
-                    sequenceNumberColor: '#0D1117',
-                    pie1: '#58A6FF',
-                    pie2: '#F85149',
-                    pie3: '#D29922',
-                    pie4: '#3FB950',
-                    pie5: '#8B949E',
-                    pieTitleTextColor: '#E6EDF3',
-                    pieSectionTextColor: '#E6EDF3',
-                    pieLegendTextColor: '#E6EDF3',
+                    background: '${palette.bg}',
+                    primaryColor: '${palette.panel}',
+                    primaryTextColor: '${palette.ink}',
+                    primaryBorderColor: '${palette.accent}',
+                    secondaryColor: '${palette.raised}',
+                    tertiaryColor: '${palette.bg}',
+                    lineColor: '${palette.muted}',
+                    textColor: '${palette.ink}',
+                    mainBkg: '${palette.panel}',
+                    nodeBorder: '${palette.accent}',
+                    clusterBkg: '${palette.panel}',
+                    clusterBorder: '${palette.line}',
+                    titleColor: '${palette.ink}',
+                    edgeLabelBackground: '${palette.bg}',
+                    actorBkg: '${palette.panel}',
+                    actorBorder: '${palette.accent}',
+                    actorTextColor: '${palette.ink}',
+                    actorLineColor: '${palette.line}',
+                    signalColor: '${palette.ink}',
+                    signalTextColor: '${palette.ink}',
+                    labelBoxBkgColor: '${palette.panel}',
+                    labelBoxBorderColor: '${palette.line}',
+                    labelTextColor: '${palette.ink}',
+                    loopTextColor: '${palette.ink}',
+                    noteBkgColor: '${palette.raised}',
+                    noteTextColor: '${palette.ink}',
+                    noteBorderColor: '${palette.line}',
+                    activationBkgColor: '${palette.raised}',
+                    sequenceNumberColor: '${palette.bg}',
+                    pie1: '${palette.accent}',
+                    pie2: '${palette.ask}',
+                    pie3: '${palette.quote}',
+                    pie4: '${palette.bid}',
+                    pie5: '${palette.muted}',
+                    pieTitleTextColor: '${palette.ink}',
+                    pieSectionTextColor: '${palette.ink}',
+                    pieLegendTextColor: '${palette.ink}',
                     xyChart: {
-                      backgroundColor: '#161B22',
-                      titleColor: '#E6EDF3',
-                      xAxisLabelColor: '#8B949E',
-                      xAxisTitleColor: '#E6EDF3',
-                      xAxisTickColor: '#30363D',
-                      xAxisLineColor: '#30363D',
-                      yAxisLabelColor: '#8B949E',
-                      yAxisTitleColor: '#E6EDF3',
-                      yAxisTickColor: '#30363D',
-                      yAxisLineColor: '#30363D',
-                      plotColorPalette: '#58A6FF'
+                      backgroundColor: '${palette.panel}',
+                      titleColor: '${palette.ink}',
+                      xAxisLabelColor: '${palette.muted}',
+                      xAxisTitleColor: '${palette.ink}',
+                      xAxisTickColor: '${palette.line}',
+                      xAxisLineColor: '${palette.line}',
+                      yAxisLabelColor: '${palette.muted}',
+                      yAxisTitleColor: '${palette.ink}',
+                      yAxisTickColor: '${palette.line}',
+                      yAxisLineColor: '${palette.line}',
+                      plotColorPalette: '${palette.accent}'
                     }
                   }
                 });

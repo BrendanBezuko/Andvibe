@@ -1,6 +1,9 @@
 # TODO
 
 ## Bugs (known, confirmed in code audit — all fixed structurally by the rebuild)
+- Commit button not working unless i spam it (needs blockign maybe)
+- commit message btn not working
+- when on a stab say board and you press console you can't exit console without leave to a different tab
 - `buildBusy` race: the agent's `cloud_build` tool and the Build tab check-then-set the flag
   from different executors (AgentTools.kt vs MainActivity) → rebuild Phase 3 (`BuildService` +
   resource lock).
@@ -19,9 +22,9 @@
 - [x] Phase 1: `AppGraph` + `ProjectSession`; `SecretStore` app-scoped; kill `GitOps` globals
 - [x] Phase 2: `TaskRunner` (coroutines, cancellation, resource locks, busy derived)
 - [x] Phase 3: `AgentRuntime` (event stream, `ToolRegistry`) + shared `BuildService`
-- [ ] Phase 4: per-tab features (Search → Understand → Build → Console → Git → Vibe → rest);
+- [x] Phase 4: per-tab features (Search → Understand → Build → Console → Git → Vibe → rest);
       persist draft text (Vibe prompt, commit message) when touching those tabs
-- [ ] Phase 5: delete `AppState`/`UiBridge`; MainActivity → nav shell
+- [x] Phase 5: delete `AppState`/`UiBridge`; MainActivity → nav shell
 - [ ] Phase 6: hardening (`:core` module, deprecation migrations below)
 
 Per phase/tab smoke pass before checking the box: open → main action → rotate → background →

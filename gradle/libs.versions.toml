@@ -14,6 +14,7 @@ desugar = "2.1.5"
 apksig = "8.7.3"
 spongycastle = "1.58.0.0"
 coroutines = "1.10.1"
+lifecycle = "2.9.4"
 json = "20240303"
 
 [libraries]
@@ -34,6 +35,7 @@ spongycastle-prov = { group = "com.madgag.spongycastle", name = "prov", version.
 spongycastle-pkix = { group = "com.madgag.spongycastle", name = "bcpkix-jdk15on", version.ref = "spongycastle" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 org-json = { group = "org.json", name = "json", version.ref = "json" }
 
 [plugins]

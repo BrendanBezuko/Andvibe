@@ -1,7 +1,7 @@
 package com.example.andvibe.tasks
 
-import com.example.andvibe.AppState
 import com.example.andvibe.DebugLog
+import com.example.andvibe.Tab
 import java.io.File
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
@@ -31,7 +31,7 @@ object Res {
  * The one job system (DESIGN.md §3.3): tracks running work, enforces resource
  * exclusion, and drives the foreground service, busy UI, and done notifications.
  * A scheduler, not a domain object — it does not know what "build" means.
- * Replaces Jobs and the AppState busy flags.
+ * Replaces Jobs and the old per-flag busy booleans.
  */
 class TaskRunner(
     private val scope: CoroutineScope,
@@ -43,7 +43,7 @@ class TaskRunner(
     class Task internal constructor(
         val id: Int,
         val label: String,
-        val tab: AppState.Tab,
+        val tab: Tab,
         val started: Long,
         val holds: Set<Resource>,
         /** Tracked tasks show in the foreground service and done notifications. */
@@ -93,7 +93,7 @@ class TaskRunner(
      */
     fun launch(
         label: String,
-        tab: AppState.Tab,
+        tab: Tab,
         holds: Set<Resource> = emptySet(),
         on: CoroutineContext,
         track: Boolean = true,

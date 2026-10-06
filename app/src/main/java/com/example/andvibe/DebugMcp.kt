@@ -3,6 +3,7 @@ package com.example.andvibe
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Base64
+import com.example.andvibe.tasks.Res
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -39,6 +40,9 @@ object DebugMcp {
     @Volatile
     private var lastRequestAt = 0L
 
+    @Volatile
+    private var appContext: Context? = null
+
     fun statusText(): String {
         if (!enabled) return "Off"
         val fail = failure
@@ -66,6 +70,7 @@ object DebugMcp {
     }
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         enabled = context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean("enabled", true)
         if (enabled) start() else publish()
     }
@@ -134,8 +139,11 @@ object DebugMcp {
     }
 
     private fun publish() {
-        UiBridge.mcpUpdate()
+        graph()?.shell?.mcpChanged()
     }
+
+    private fun graph(): AppGraph? =
+        (appContext?.applicationContext as? AndVibeApp)?.graph
 
     private fun handle(socket: Socket) {
         socket.soTimeout = 30_000
@@ -243,8 +251,14 @@ object DebugMcp {
         val text = try {
             when (name) {
                 "logs" -> DebugLog.text(args.optString("area", ""), args.optInt("limit", 200))
-                "build_log" -> AppState.buildText().ifBlank { "build log is empty" }
-                "console_log" -> AppState.text().ifBlank { "console log is empty" }
+                "build_log" -> {
+                    val text = graph()?.buildLog?.snapshot().orEmpty()
+                    text.ifBlank { "build log is empty" }
+                }
+                "console_log" -> {
+                    val text = graph()?.consoleLog?.text().orEmpty()
+                    text.ifBlank { "console log is empty" }
+                }
                 "state" -> stateText()
                 else -> return toolError("unknown tool: $name")
             }
@@ -255,19 +269,22 @@ object DebugMcp {
     }
 
     private fun screenshot(tabArg: String, nameArg: String): JSONObject {
+        val g = graph() ?: return toolError("AndVibe is not ready")
         val tab = tabArg.trim().takeIf { it.isNotEmpty() }?.let { raw ->
-            AppState.Tab.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
+            Tab.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
                 ?: return toolError("unknown tab: $raw")
         }
-        val bitmap = UiBridge.screenshot(tab) ?: return toolError("AndVibe is not on screen. Open it on the device and try again.")
+        val bitmap = g.shell.screenshot(tab)
+            ?: return toolError("AndVibe is not on screen. Open it on the device and try again.")
         val png = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, png)
         val bytes = png.toByteArray()
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        val label = (tab ?: AppState.tab).name.lowercase()
+        val label = (tab ?: Tab.CONSOLE).name.lowercase()
         val base = nameArg.trim().removeSuffix(".png").filter { it.isLetterOrDigit() || it == '-' || it == '_' }
             .take(60).ifEmpty { "$label-$stamp" }
-        val dir = AppState.appContext.getExternalFilesDir("screenshots") ?: error("external files dir is unavailable")
+        val ctx = appContext ?: return toolError("AndVibe is not ready")
+        val dir = ctx.getExternalFilesDir("screenshots") ?: error("external files dir is unavailable")
         dir.mkdirs()
         val file = File(dir, "$base.png")
         file.writeBytes(bytes)
@@ -287,27 +304,29 @@ object DebugMcp {
     }
 
     private fun stateText(): String {
-        if (!AppState.isReady()) return "ready=false\nmcp=127.0.0.1:$PORT\nmcpListening=$listening"
-        val snap = AppState.gitSnapshot
+        val g = graph()
+        if (g == null || !g.ready) return "ready=false\nmcp=127.0.0.1:$PORT\nmcpListening=$listening"
+        val session = g.session
+        val tasks = g.tasks
+        val snap = g.gitFeature.state.value.snapshot
         return buildString {
             append("ready=true\n")
             append("mcp=127.0.0.1:$PORT\n")
             append("mcpListening=$listening\n")
-            append("tab=${AppState.tab}\n")
-            append("cwd=${AppState.cwd.absolutePath}\n")
-            append("open=${AppState.openFile?.absolutePath.orEmpty()}\n")
-            append("buildBusy=${AppState.buildBusy}\n")
-            append("reviseBusy=${AppState.reviseBusy}\n")
-            append("gitBusy=${AppState.gitBusy}\n")
-            append("vibeBusy=${AppState.vibeBusy}\n")
-            append("understandBusy=${AppState.understandBusy}\n")
-            append("findBusy=${AppState.findBusy}\n")
-            append("downloadBusy=${AppState.downloadBusy}\n")
-            append("importBusy=${AppState.importBusy}\n")
-            append("consoleBusy=${AppState.consoleBusy}\n")
-            append("anyBusy=${AppState.anyBusy()}\n")
-            append("busyLabel=${AppState.busyLabel().orEmpty()}\n")
-            append("lastApk=${AppState.lastApk.orEmpty()}\n")
+            append("cwd=${session.cwd.absolutePath}\n")
+            append("open=${session.openFile?.absolutePath.orEmpty()}\n")
+            append("buildBusy=${tasks.holds(Res.BUILD)}\n")
+            append("reviseBusy=${tasks.holds(Res.REVISE)}\n")
+            append("gitBusy=${tasks.holds(Res.GIT)}\n")
+            append("vibeBusy=${tasks.holds(Res.AGENT)}\n")
+            append("understandBusy=${tasks.holds(Res.UNDERSTAND)}\n")
+            append("findBusy=${tasks.holds(Res.FIND)}\n")
+            append("downloadBusy=${tasks.holds(Res.DOWNLOAD)}\n")
+            append("importBusy=${tasks.holds(Res.IMPORT)}\n")
+            append("consoleBusy=${tasks.holds(Res.CONSOLE)}\n")
+            append("anyBusy=${g.anyBusy()}\n")
+            append("busyLabel=${g.busyLabel().orEmpty()}\n")
+            append("lastApk=${g.buildFeature.state.value.lastApkPath.orEmpty()}\n")
             val ws = WorkspaceStore.current()
             append("workspace=${ws.name}\n")
             append("workspaceRepos=${ws.repos.sorted().joinToString(",")}\n")

@@ -8,7 +8,7 @@ object ProjectStore {
     private const val LAST = "last"
 
     fun remember(context: Context, dir: File) {
-        val repos = AppState.reposDir.canonicalFile
+        val repos = File(context.applicationContext.filesDir, "repos").canonicalFile
         val canon = dir.canonicalFile
         if (canon != repos && !canon.path.startsWith(repos.path + File.separator)) return
         if (canon == repos) return

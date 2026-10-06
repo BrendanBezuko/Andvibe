@@ -8,7 +8,11 @@ import java.io.File
  * Owns the open project: the repos dir, the working directory, and the open file.
  * The single owner for project/workspace scoping (DESIGN.md §3.4).
  */
-class ProjectSession(context: Context) {
+class ProjectSession(
+    context: Context,
+    private val onGitInvalidate: () -> Unit = {},
+    private val onProjectChanged: () -> Unit = {},
+) {
     val appContext: Context = context.applicationContext
     val reposDir: File = File(appContext.filesDir, "repos").apply { mkdirs() }
 
@@ -35,5 +39,23 @@ class ProjectSession(context: Context) {
             return root
         }
         return WorkspaceStore.activeRepos().singleOrNull()
+    }
+
+    /** Reset cwd to repos root when the open path is outside the workspace. */
+    fun fitWorkspace(toRoot: Boolean = false): Boolean {
+        if (!toRoot && WorkspaceStore.contains(cwd)) return false
+        if (cwd.canonicalFile == reposDir.canonicalFile) return false
+        cwd = reposDir
+        openFile = null
+        onGitInvalidate()
+        onProjectChanged()
+        return true
+    }
+
+    fun inWorkspace(file: File): File {
+        if (!WorkspaceStore.contains(file)) {
+            error("${RepoFiles.display(file, reposDir)} is not in this workspace")
+        }
+        return file
     }
 }

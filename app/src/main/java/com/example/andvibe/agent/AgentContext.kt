@@ -3,7 +3,7 @@ package com.example.andvibe.agent
 import java.io.File
 
 /**
- * Per-run agent context. No AppState / UiBridge (DESIGN.md Phase 3 exit).
+ * Per-run agent context. No global app state or UI listener bus (DESIGN.md Phase 3 exit).
  * Build and workspace side effects go through [ToolRegistry] injectables.
  */
 class AgentContext(

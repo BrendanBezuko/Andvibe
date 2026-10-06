@@ -11,7 +11,13 @@ object ChatStore {
         val title: String,
         val updated: Long,
         val turns: List<Pair<String, String>>,
-        val memory: List<Pair<String, String>>
+        val memory: List<Pair<String, String>>,
+    )
+
+    data class ChatContent(
+        val chatId: String,
+        val turns: List<Pair<String, String>>,
+        val memory: List<Pair<String, String>>,
     )
 
     private const val MAX_CHATS = 50
@@ -24,78 +30,96 @@ object ChatStore {
     fun init(context: android.content.Context) {
         if (::dir.isInitialized) return
         dir = File(context.applicationContext.filesDir, "chats").apply { mkdirs() }
-        sync()
     }
 
     fun chats(): List<Chat> = items.sortedByDescending { it.updated }
 
     fun activeId(): String = chatId
 
-    fun sync(): Boolean {
-        if (!::dir.isInitialized || AppState.vibeBusy) return false
+    fun activeContent(): ChatContent = contentForActive()
+
+    /** Switches persisted workspace; returns loaded chat when workspace changed. */
+    fun syncWorkspace(
+        turns: List<Pair<String, String>>,
+        memory: List<Pair<String, String>>,
+    ): ChatContent? {
+        if (!::dir.isInitialized) return null
         val ws = WorkspaceStore.current().id
-        if (ws == workspaceId) return false
-        save()
+        if (ws == workspaceId) return null
+        save(turns, memory)
         workspaceId = ws
         load()
-        show(items.firstOrNull { it.id == chatId })
-        return true
+        return contentForActive()
     }
 
-    fun save() {
+    fun save(turns: List<Pair<String, String>>, memory: List<Pair<String, String>>) {
         if (!::dir.isInitialized || workspaceId.isEmpty()) return
-        val turns = AppState.chat.map { (role, text) -> role to text.take(MAX_TURN_CHARS) }
-        if (turns.isEmpty()) return
+        val clipped = turns.map { (role, text) -> role to text.take(MAX_TURN_CHARS) }
+        if (clipped.isEmpty()) return
         if (chatId.isEmpty()) chatId = UUID.randomUUID().toString()
-        val title = turns.firstOrNull { it.first == "user" }?.second
+        val title = clipped.firstOrNull { it.first == "user" }?.second
             ?.replace(Regex("\\s+"), " ")?.trim()?.take(80)
             ?.ifBlank { null } ?: "Chat"
-        val chat = Chat(chatId, title, System.currentTimeMillis(), turns, AppState.history.toList())
+        val chat = Chat(chatId, title, System.currentTimeMillis(), clipped, memory.toList())
         val index = items.indexOfFirst { it.id == chatId }
         if (index >= 0) items[index] = chat else items.add(chat)
         while (items.size > MAX_CHATS) items.remove(items.minBy { it.updated })
         write()
     }
 
-    fun open(id: String): Boolean {
-        if (AppState.vibeBusy || id == chatId) return false
-        val chat = items.firstOrNull { it.id == id } ?: return false
-        save()
-        show(chat)
+    fun openChat(
+        id: String,
+        currentTurns: List<Pair<String, String>>,
+        currentMemory: List<Pair<String, String>>,
+    ): ChatContent? {
+        if (id == chatId) return null
+        val chat = items.firstOrNull { it.id == id } ?: return null
+        save(currentTurns, currentMemory)
+        setActive(chat)
         write()
-        return true
+        return ChatContent(chat.id, chat.turns, chat.memory)
     }
 
-    fun startNew() {
-        if (AppState.vibeBusy) return
-        save()
-        show(null)
+    fun startNewChat(
+        currentTurns: List<Pair<String, String>>,
+        currentMemory: List<Pair<String, String>>,
+    ): ChatContent {
+        save(currentTurns, currentMemory)
+        setActive(null)
         write()
+        return contentForActive()
     }
 
-    fun delete(id: String) {
-        if (AppState.vibeBusy && id == chatId) return
+    fun deleteChat(id: String): ChatContent? {
         items.removeAll { it.id == id }
-        if (id == chatId) show(null)
+        if (id == chatId) setActive(null)
         write()
+        return contentForActive()
     }
 
-    fun forget(workspace: String) {
+    fun forgetWorkspace(workspace: String, agentBusy: Boolean) {
         if (!::dir.isInitialized) return
         file(workspace).delete()
         if (workspace != workspaceId) return
         workspaceId = ""
         items.clear()
-        if (!AppState.vibeBusy) show(null)
+        if (!agentBusy) {
+            chatId = ""
+        }
     }
 
-    private fun show(chat: Chat?) {
+    private fun contentForActive(): ChatContent {
+        if (chatId.isEmpty()) return ChatContent("", emptyList(), emptyList())
+        val chat = items.firstOrNull { it.id == chatId }
+        return if (chat != null) {
+            ChatContent(chat.id, chat.turns, chat.memory)
+        } else {
+            ChatContent("", emptyList(), emptyList())
+        }
+    }
+
+    private fun setActive(chat: Chat?) {
         chatId = chat?.id.orEmpty()
-        AppState.chat.clear()
-        AppState.history.clear()
-        if (chat == null) return
-        AppState.chat.addAll(chat.turns)
-        chat.memory.forEach { AppState.history.addLast(it) }
     }
 
     private fun file(workspace: String) = File(dir, "$workspace.json")
@@ -122,8 +146,8 @@ object ChatStore {
                         title = obj.optString("title").ifBlank { "Chat" },
                         updated = obj.optLong("updated"),
                         turns = turns,
-                        memory = readPairs(obj.optJSONArray("memory"))
-                    )
+                        memory = readPairs(obj.optJSONArray("memory")),
+                    ),
                 )
             }
         }
@@ -159,7 +183,7 @@ object ChatStore {
                         .put("title", chat.title)
                         .put("updated", chat.updated)
                         .put("turns", writePairs(chat.turns))
-                        .put("memory", writePairs(chat.memory))
+                        .put("memory", writePairs(chat.memory)),
                 )
             }
             val json = JSONObject().put("current", chatId).put("items", arr)

@@ -3,7 +3,7 @@ package com.example.andvibe
 import com.example.andvibe.core.RepoFiles
 
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
 
 data class UnderstandResult(val markdown: String, val defs: Int, val files: Int)
 
@@ -51,19 +51,19 @@ object Understand {
         key: String,
         model: String,
         base: String,
-        stop: AtomicBoolean,
+        stop: () -> Boolean,
         onStep: (String) -> Unit
     ): UnderstandResult {
-        if (stop.get()) error("stopped")
+        if (stop()) throw CancellationException("stopped")
         onStep("Scanning source for function defs")
         val defs = scan(root)
-        if (stop.get()) error("stopped")
+        if (stop()) throw CancellationException("stopped")
         onStep("Found ${defs.size} defs in ${defs.map { it.path }.toSet().size} files")
         val packed = pack(root, focus, defs)
-        if (stop.get()) error("stopped")
+        if (stop()) throw CancellationException("stopped")
         onStep("Asking ${provider.label} for ratings and diagrams")
         val prose = AiClient.complete(systemPrompt, packed, provider, key, model, base, maxUser = 80_000)
-        if (stop.get()) error("stopped")
+        if (stop()) throw CancellationException("stopped")
         val markdown = assemble(root.name, prose, defs, focus)
         return UnderstandResult(markdown, defs.size, defs.map { it.path }.toSet().size)
     }

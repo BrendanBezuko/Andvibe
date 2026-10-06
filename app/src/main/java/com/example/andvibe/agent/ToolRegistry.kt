@@ -10,7 +10,7 @@ import java.io.File
 
 /**
  * Named tools with individual execute bodies (DESIGN.md §3.7).
- * Replaces the monolithic AgentTools dispatch. No AppState / UiBridge.
+ * Replaces the monolithic AgentTools dispatch. No global app state or UI listener bus.
  */
 class ToolRegistry(
     private val cloudBuild: (root: File) -> String,

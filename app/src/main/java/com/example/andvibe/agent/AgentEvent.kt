@@ -2,7 +2,7 @@ package com.example.andvibe.agent
 
 import java.io.File
 
-/** Progress stream from AgentRuntime (DESIGN.md §3.7). Replaces onStep + direct UiBridge. */
+/** Progress stream from AgentRuntime (DESIGN.md §3.7). Replaces onStep + direct shell posts. */
 sealed interface AgentEvent {
     data class Step(val text: String) : AgentEvent
     data class ToolCall(val name: String, val summary: String) : AgentEvent

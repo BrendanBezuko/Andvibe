@@ -1,6 +1,6 @@
 package com.example.andvibe.tasks
 
-import com.example.andvibe.AppState
+import com.example.andvibe.Tab
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -43,18 +43,18 @@ class TaskRunnerTest {
         val h = Harness(this)
         val gate = CompletableDeferred<Unit>()
         val r = Resource("x")
-        val first = h.runner.launch("one", AppState.Tab.CONSOLE, setOf(r), on = lane()) {
+        val first = h.runner.launch("one", Tab.CONSOLE, setOf(r), on = lane()) {
             gate.await()
             null
         }
         assertNotNull(first)
         assertTrue(h.runner.holds(r))
-        assertNull(h.runner.launch("two", AppState.Tab.CONSOLE, setOf(r), on = lane()) { null })
+        assertNull(h.runner.launch("two", Tab.CONSOLE, setOf(r), on = lane()) { null })
         gate.complete(Unit)
         advanceUntilIdle()
         assertFalse(h.runner.holds(r))
         assertFalse(h.runner.anyActive())
-        assertNotNull(h.runner.launch("three", AppState.Tab.CONSOLE, setOf(r), on = lane()) { null })
+        assertNotNull(h.runner.launch("three", Tab.CONSOLE, setOf(r), on = lane()) { null })
         advanceUntilIdle()
     }
 
@@ -64,9 +64,9 @@ class TaskRunnerTest {
         val r = Resource("build")
         assertTrue(h.runner.tryClaim(r))
         assertFalse(h.runner.tryClaim(r))
-        assertNull(h.runner.launch("b", AppState.Tab.BUILD, setOf(r), on = lane()) { null })
+        assertNull(h.runner.launch("b", Tab.BUILD, setOf(r), on = lane()) { null })
         h.runner.release(r)
-        assertNotNull(h.runner.launch("b", AppState.Tab.BUILD, setOf(r), on = lane()) { null })
+        assertNotNull(h.runner.launch("b", Tab.BUILD, setOf(r), on = lane()) { null })
         advanceUntilIdle()
     }
 
@@ -74,7 +74,7 @@ class TaskRunnerTest {
     fun cancelRemovesTaskAndSkipsNotification() = runTest {
         val h = Harness(this)
         val never = CompletableDeferred<Unit>()
-        val task = h.runner.launch("long", AppState.Tab.VIBE, setOf(Res.AGENT), on = lane()) {
+        val task = h.runner.launch("long", Tab.VIBE, setOf(Res.AGENT), on = lane()) {
             never.await()
             TaskRunner.Done("finished", "should not appear")
         }
@@ -92,16 +92,16 @@ class TaskRunnerTest {
     fun notifiesOnlyWhenInvisibleAndTracked() = runTest {
         val h = Harness(this)
         h.runner.visible = true
-        h.runner.launch("a", AppState.Tab.BUILD, on = lane()) { TaskRunner.Done("t", "x") }
+        h.runner.launch("a", Tab.BUILD, on = lane()) { TaskRunner.Done("t", "x") }
         advanceUntilIdle()
         assertTrue(h.notified.isEmpty())
 
         h.runner.visible = false
-        h.runner.launch("b", AppState.Tab.BUILD, on = lane()) { TaskRunner.Done("done", "y") }
+        h.runner.launch("b", Tab.BUILD, on = lane()) { TaskRunner.Done("done", "y") }
         advanceUntilIdle()
         assertEquals(listOf("done"), h.notified.map { it.second.title })
 
-        h.runner.launch("quiet", AppState.Tab.GIT, on = lane(), track = false) { TaskRunner.Done("no", "z") }
+        h.runner.launch("quiet", Tab.GIT, on = lane(), track = false) { TaskRunner.Done("no", "z") }
         advanceUntilIdle()
         assertEquals(1, h.notified.size)
     }
@@ -110,7 +110,7 @@ class TaskRunnerTest {
     fun untrackedTasksStayOutOfServiceList() = runTest {
         val h = Harness(this)
         val gate = CompletableDeferred<Unit>()
-        h.runner.launch("bg", AppState.Tab.SEARCH, on = lane(), track = false) {
+        h.runner.launch("bg", Tab.SEARCH, on = lane(), track = false) {
             gate.await()
             null
         }
@@ -125,7 +125,7 @@ class TaskRunnerTest {
         val h = Harness(this)
         h.syncThrows = 1
         val gate = CompletableDeferred<Unit>()
-        val task = h.runner.launch("work", AppState.Tab.BUILD, on = lane()) {
+        val task = h.runner.launch("work", Tab.BUILD, on = lane()) {
             gate.await()
             TaskRunner.Done("ok", "survived")
         }

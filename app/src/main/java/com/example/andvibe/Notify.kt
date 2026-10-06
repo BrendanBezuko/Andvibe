@@ -70,7 +70,7 @@ object Notify {
             .setProgress(0, 0, true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setContentIntent(open(context, first?.tab ?: AppState.tab, 0))
+            .setContentIntent(open(context, first?.tab ?: Tab.CONSOLE, 0))
             .build()
     }
 
@@ -103,7 +103,7 @@ object Notify {
         }
     }
 
-    private fun open(context: Context, tab: AppState.Tab, requestCode: Int): PendingIntent {
+    private fun open(context: Context, tab: Tab, requestCode: Int): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             .putExtra(EXTRA_TAB, tab.name)
@@ -132,14 +132,14 @@ object Notify {
         )
     }
 
-    private fun icon(tab: AppState.Tab?): Int = when (tab) {
-        AppState.Tab.BUILD -> R.drawable.ic_nav_build
-        AppState.Tab.VIBE -> R.drawable.ic_nav_vibe
-        AppState.Tab.UNDERSTAND -> R.drawable.ic_nav_understand
-        AppState.Tab.GIT -> R.drawable.ic_nav_git
-        AppState.Tab.FILES -> R.drawable.ic_nav_files
-        AppState.Tab.SEARCH -> R.drawable.ic_nav_search
-        AppState.Tab.BOARD -> R.drawable.ic_nav_board
+    private fun icon(tab: Tab?): Int = when (tab) {
+        Tab.BUILD -> R.drawable.ic_nav_build
+        Tab.VIBE -> R.drawable.ic_nav_vibe
+        Tab.UNDERSTAND -> R.drawable.ic_nav_understand
+        Tab.GIT -> R.drawable.ic_nav_git
+        Tab.FILES -> R.drawable.ic_nav_files
+        Tab.SEARCH -> R.drawable.ic_nav_search
+        Tab.BOARD -> R.drawable.ic_nav_board
         else -> R.drawable.ic_nav_console
     }
 }

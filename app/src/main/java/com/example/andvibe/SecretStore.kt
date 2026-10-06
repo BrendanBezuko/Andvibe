@@ -90,6 +90,12 @@ class SecretStore(context: Context) {
             .apply()
     }
 
+    fun draftCommitMessage(): String = prefs.getString("draft_commit_msg", "") ?: ""
+
+    fun saveDraftCommitMessage(text: String) {
+        prefs.edit().putString("draft_commit_msg", text).apply()
+    }
+
     @Suppress("DEPRECATION")
     private fun createEncrypted(context: Context): SharedPreferences? {
         return try {

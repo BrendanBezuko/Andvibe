@@ -35,15 +35,21 @@ object WorkspaceStore {
 
     private const val MAX_CARDS = 200
     private lateinit var file: File
+    private lateinit var reposDir: File
     private var ready = false
     private var currentId = ""
     private var scoped = false
     private val items = mutableListOf<Workspace>()
 
+    @Volatile
+    var onUsageChanged: (() -> Unit)? = null
+
     fun init(context: android.content.Context) {
         synchronized(this) {
             if (ready) return
-            file = File(context.applicationContext.filesDir, "workspaces.json")
+            val app = context.applicationContext
+            file = File(app.filesDir, "workspaces.json")
+            reposDir = File(app.filesDir, "repos").apply { mkdirs() }
             load()
             ready = true
         }
@@ -58,7 +64,7 @@ object WorkspaceStore {
     }
 
     fun downloaded(): List<String> {
-        return AppState.reposDir.listFiles()
+        return reposDir.listFiles()
             ?.filter { it.isDirectory && !it.name.startsWith(".") }
             ?.mapNotNull { cleanRepo(it.name) }
             ?.sortedBy { it.lowercase() }
@@ -67,11 +73,11 @@ object WorkspaceStore {
 
     fun activeRepos(): List<File> {
         val names = current().repos
-        return downloaded().filter { it in names }.map { File(AppState.reposDir, it) }
+        return downloaded().filter { it in names }.map { File(reposDir, it) }
     }
 
     fun contains(file: File): Boolean {
-        val root = AppState.reposDir.canonicalFile
+        val root = reposDir.canonicalFile
         val canon = file.canonicalFile
         if (canon == root) return true
         if (!canon.path.startsWith(root.path + File.separator)) return false
@@ -187,7 +193,7 @@ object WorkspaceStore {
                 )
             }
         }
-        UiBridge.usageUpdate()
+        onUsageChanged?.invoke()
     }
 
     fun priceText(micros: Long): String {

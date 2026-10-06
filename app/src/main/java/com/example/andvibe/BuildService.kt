@@ -14,6 +14,8 @@ import java.io.File
 class BuildService(
     private val app: Context,
     private val tasks: TaskRunner,
+    private val buildLog: com.example.andvibe.features.build.BuildLog? = null,
+    private val onBuildChanged: (() -> Unit)? = null,
 ) {
     enum class Mode {
         /** gradlew → Cloud Run; otherwise local JsRunner + ApkPackager. */
@@ -32,7 +34,6 @@ class BuildService(
     /**
      * @param nestClaim claim Res.BUILD for the duration (agent tool). False when
      *   the caller already holds BUILD via TaskRunner.launch.
-     * @param mirrorConsole also append each log line to the console (Build tab).
      */
     fun run(
         root: File,
@@ -40,14 +41,17 @@ class BuildService(
         buildToken: String,
         mode: Mode = Mode.AUTO,
         nestClaim: Boolean = false,
-        mirrorConsole: Boolean = false,
         log: (String) -> Unit,
     ): Outcome {
         if (nestClaim && !tasks.tryClaim(Res.BUILD)) error("a build is already running")
         val started = System.currentTimeMillis()
+        val captured = StringBuilder()
         val sink: (String) -> Unit = { line ->
             log(line)
-            if (mirrorConsole) AppState.log(line)
+            synchronized(captured) {
+                captured.append(line).append('\n')
+                if (captured.length > 200_000) captured.delete(0, captured.length - 120_000)
+            }
         }
         var built: File? = null
         var summary = ""
@@ -74,7 +78,6 @@ class BuildService(
                         DebugLog.step("build", "mode=cloud")
                         if (mode == Mode.AUTO) sink("Gradle project. Sending it to Cloud Run.")
                         val apk = CloudBuild.build(app, root, buildUrl, buildToken, sink)
-                        AppState.lastApk = apk.absolutePath
                         built = apk
                         title = "Build ready"
                         summary = if (mode == Mode.CLOUD_ONLY) {
@@ -93,7 +96,6 @@ class BuildService(
                     sink(JsRunner.test(root))
                     sink("")
                     val apk = ApkPackager.packageApk(app, root, sink)
-                    AppState.lastApk = apk.absolutePath
                     built = apk
                     title = "Build ready"
                     summary = "${root.name}: ${apk.name}"
@@ -121,29 +123,34 @@ class BuildService(
             sink("build failed: $message")
             summary = message
         } finally {
+            val logText = synchronized(captured) { captured.toString() }
             BuildHistory.record(
                 root.name,
                 started,
                 built != null,
                 built?.name,
                 summary,
-                AppState.buildText(),
+                logText,
             )
             if (nestClaim) tasks.release(Res.BUILD)
-            UiBridge.buildUpdate()
         }
         return Outcome(title, summary, built, cloud)
     }
 
     /**
-     * Agent cloud_build tool entry. Nest-claims BUILD, writes the shared build
-     * log, and returns the tool result string. Keeps AppState/UiBridge out of agent/.
+     * Agent cloud_build tool entry. Nest-claims BUILD, optionally mirrors into [buildLog],
+     * and returns the tool result string.
      */
-    fun agentCloudBuild(root: File, buildUrl: String, buildToken: String): String {
-        AppState.clearBuild()
+    fun agentCloudBuild(
+        root: File,
+        buildUrl: String,
+        buildToken: String,
+        buildLog: com.example.andvibe.features.build.BuildLog? = null,
+    ): String {
+        buildLog?.clear()
         val local = StringBuilder()
         val note: (String) -> Unit = { line ->
-            AppState.buildLog(line)
+            buildLog?.append(line)
             synchronized(local) {
                 local.append(line).append('\n')
                 if (local.length > 200_000) local.delete(0, local.length - 120_000)
@@ -157,12 +164,13 @@ class BuildService(
                 buildToken = buildToken,
                 mode = Mode.CLOUD_ONLY,
                 nestClaim = true,
-                mirrorConsole = false,
                 log = note,
             )
+            if (buildLog != null) onBuildChanged?.invoke()
             val apk = outcome.apk ?: error(outcome.summary)
             "BUILD SUCCESSFUL\nAPK: ${apk.name}\n\n" + tail(synchronized(local) { local.toString() }, 3_000)
         } catch (t: Throwable) {
+            if (buildLog != null) onBuildChanged?.invoke()
             val message = t.message ?: t.javaClass.simpleName
             "BUILD FAILED: $message\n\n" + tail(synchronized(local) { local.toString() }, 14_000)
         }

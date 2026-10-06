@@ -2,6 +2,7 @@
 <resources>
     <color name="bg">#FF0D1117</color>
     <color name="panel">#FF161B22</color>
+    <color name="raised">#FF21262D</color>
     <color name="ink">#FFE6EDF3</color>
     <color name="muted">#FF8B949E</color>
     <color name="accent">#FF58A6FF</color>

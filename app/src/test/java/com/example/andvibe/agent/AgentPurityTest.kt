@@ -5,10 +5,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** agent/ must not reference AppState or UiBridge (DESIGN.md Phase 3 exit). */
+/** agent/ must not reference deleted global state or the old UI listener bus (DESIGN.md Phase 3/5). */
 class AgentPurityTest {
     @Test
-    fun agentHasNoAppStateOrUiBridge() {
+    fun agentHasNoLegacyGlobals() {
+        val banned = listOf("App" + "State", "Ui" + "Bridge")
         val dir = sequenceOf(
             "src/main/java/com/example/andvibe/agent",
             "app/src/main/java/com/example/andvibe/agent",
@@ -22,17 +23,10 @@ class AgentPurityTest {
                     if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
                         return@mapIndexedNotNull null
                     }
-                    when {
-                        trimmed.startsWith("import com.example.andvibe.AppState") ->
-                            "${file.name}:${i + 1} $line"
-                        trimmed.startsWith("import com.example.andvibe.UiBridge") ->
-                            "${file.name}:${i + 1} $line"
-                        Regex("""\bAppState\b""").containsMatchIn(trimmed) ->
-                            "${file.name}:${i + 1} $line"
-                        Regex("""\bUiBridge\b""").containsMatchIn(trimmed) ->
-                            "${file.name}:${i + 1} $line"
-                        else -> null
-                    }
+                    banned.firstOrNull { name ->
+                        trimmed.startsWith("import com.example.andvibe.$name") ||
+                            Regex("""\b${Regex.escape(name)}\b""").containsMatchIn(trimmed)
+                    }?.let { "${file.name}:${i + 1} $line" }
                 }
             }
             .toList()
