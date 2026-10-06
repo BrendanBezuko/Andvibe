@@ -22,6 +22,7 @@ object Jobs {
         }
         DebugLog.step("jobs", "begin ${job.id} $label")
         WorkService.sync(context.applicationContext)
+        UiBridge.busyUpdate()
         return job
     }
 
@@ -30,6 +31,7 @@ object Jobs {
         DebugLog.step("jobs", "end ${removed.id} $title")
         val context = AppState.appContext
         main.post { WorkService.sync(context) }
+        UiBridge.busyUpdate()
         if (!visible) Notify.done(context, removed, title, text, apk)
     }
 

@@ -166,6 +166,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         onBuild()
         onGit()
         openTabFrom(intent)
+        paintBusy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -208,10 +209,38 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         if (nearBottom) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
+    override fun onBusy() {
+        if (!::binding.isInitialized) return
+        paintBusy()
+    }
+
+    private fun paintBusy() {
+        val label = AppState.busyLabel()
+        val busy = label != null
+        binding.busyBar.visibility = if (busy) View.VISIBLE else View.GONE
+        binding.busyTrack.visibility = if (busy) View.VISIBLE else View.GONE
+        binding.busyLabel.text = label.orEmpty()
+        paintConsoleBusy()
+        paintFilesBusy()
+    }
+
+    private fun paintConsoleBusy() {
+        val page = binding.consolePage
+        val running = AppState.consoleBusy
+        BusyUi.setEnabled(page.commandRun, !running)
+        page.commandInput.isEnabled = !running
+    }
+
+    private fun paintFilesBusy() {
+        if (editing) return
+        BusyUi.setEnabled(binding.filesPage.filesOpen, !(AppState.importBusy || AppState.downloadBusy))
+    }
+
     private fun paintTape() {
-        val project = runCatching { AppState.projectRoot().name }.getOrDefault("—")
+        val project = AppState.selectedRoot()?.name ?: "—"
         binding.consolePage.consoleProject.text = project
         binding.consolePage.consoleClock.text = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+        paintConsoleBusy()
     }
 
     private fun paintLog(raw: String): CharSequence {
@@ -307,6 +336,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 send.text = "Stop"
             }
         }
+        paintBusy()
         val paths = AppState.writtenPaths
         AppState.writtenPaths = emptyList()
         if (paths.isNotEmpty()) {
@@ -330,7 +360,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val text = AppState.buildText()
         binding.buildPage.buildLog.text = text
         val page = binding.buildPage
-        val root = runCatching { AppState.projectRoot() }.getOrNull()
+        val root = AppState.selectedRoot()
         page.projectLine.text = if (root == null) {
             "No repo yet. Clone one from Search."
         } else {
@@ -349,12 +379,13 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
         page.buildStatus.text = status
         page.buildStatus.setTextColor(getColor(statusColor))
-        binding.buildPage.installApk.isEnabled = apkReady && !busy
-        binding.buildPage.buildApk.isEnabled = !busy
+        BusyUi.setEnabled(binding.buildPage.installApk, apkReady && !busy)
+        BusyUi.setEnabled(binding.buildPage.buildApk, !busy)
         binding.buildPage.buildApk.text = if (AppState.buildBusy) "Building…" else "Build APK"
-        binding.buildPage.reviseBuild.isEnabled = !busy && text.isNotBlank()
+        BusyUi.setEnabled(binding.buildPage.reviseBuild, !busy && text.isNotBlank())
         binding.buildPage.reviseBuild.contentDescription =
             if (AppState.reviseBusy) "Revising…" else "Revise"
+        paintBusy()
         if (nearBottom && text.isNotBlank()) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
@@ -407,12 +438,15 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
         val enabled = !AppState.gitBusy
         for (button in listOf(page.gitRefresh, page.gitPull, page.gitPush, page.gitMore)) {
-            button.isEnabled = enabled
-            button.alpha = if (enabled) 1f else 0.4f
+            BusyUi.setEnabled(button, enabled)
         }
-        page.gitBranch.isEnabled = enabled
-        page.gitCommit.isEnabled = enabled
-        page.gitSuggest.isEnabled = enabled && snap?.isRepo == true && snap.changes.isNotEmpty()
+        BusyUi.setEnabled(page.gitBranch, enabled)
+        BusyUi.setEnabled(page.gitCommit, enabled)
+        BusyUi.setEnabled(page.gitSuggest, enabled && snap?.isRepo == true && snap.changes.isNotEmpty())
+        BusyUi.setEnabled(page.createRelease, enabled)
+        page.releaseName.isEnabled = enabled
+        page.releaseNotes.isEnabled = enabled
+        paintBusy()
         syncBack()
     }
 
@@ -445,7 +479,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun paintProject() {
         if (!::binding.isInitialized) return
-        val name = runCatching { AppState.projectRoot().name }.getOrNull()
+        val name = AppState.selectedRoot()?.name
         binding.openProject.text = name ?: "—"
         binding.openProject.setTextColor(getColor(if (name == null) R.color.muted else R.color.accent))
     }
@@ -960,6 +994,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private fun ensureFossFeed() {
         if (!FossFeed.stale(this) || AppState.feedBusy) return
         AppState.feedBusy = true
+        UiBridge.busyUpdate()
         if (AppState.findBrief.isBlank()) {
             AppState.findNote = "Refreshing the daily FOSS cache…"
             if (AppState.tab == AppState.Tab.SEARCH) renderFind()
@@ -970,6 +1005,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             }
             AppState.feedBusy = false
             if (AppState.findBrief.isBlank()) AppState.findNote = note
+            UiBridge.busyUpdate()
             runOnUiThread {
                 if (!isFinishing && AppState.tab == AppState.Tab.SEARCH) renderFind()
             }
@@ -1148,6 +1184,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun submitCommand() {
+        if (AppState.consoleBusy) return
         val line = binding.consolePage.commandInput.text?.toString()?.trim().orEmpty()
         if (line.isEmpty()) return
         binding.consolePage.commandInput.setText("")
@@ -1155,6 +1192,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val parts = Console.tokenize(line)
         val slow = parts.getOrNull(0) == "git" && parts.getOrNull(1) in setOf("clone", "push", "pull", "fetch")
         val job = if (slow) startJob(parts.take(2).joinToString(" "), AppState.Tab.CONSOLE) else null
+        AppState.consoleBusy = true
+        paintBusy()
         AppState.io.execute {
             try {
                 Console.run(line)
@@ -1163,6 +1202,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 val msg = t.message ?: t.javaClass.simpleName
                 AppState.log("error: $msg")
                 if (job != null) Jobs.end(job, "${job.label} failed", msg)
+            } finally {
+                AppState.consoleBusy = false
+                UiBridge.busyUpdate()
             }
         }
     }
@@ -1188,6 +1230,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.findBrief = ""
         AppState.findNote = "Searching the web, then checking GitHub, GitLab, Codeberg, and SourceHut…"
         renderFind()
+        UiBridge.busyUpdate()
         DebugLog.step("find", "start chars=${query.length} provider=${provider.id}")
         AppState.io.execute {
             val result = try {
@@ -1202,6 +1245,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             AppState.findNote = result.note
             AppState.findBusy = false
             DebugLog.step("find", "done hits=${result.hits.size}")
+            UiBridge.busyUpdate()
             runOnUiThread {
                 if (!isFinishing) renderFind()
             }
@@ -1210,7 +1254,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun renderFind() {
         val page = binding.searchPage
-        page.findGo.isEnabled = !AppState.findBusy
+        BusyUi.setEnabled(page.findGo, !AppState.findBusy)
         page.findGo.text = if (AppState.findBusy) "Searching…" else "Search"
         val note = AppState.findNote
         val model = store.get(currentProvider, "model", currentProvider.defaultModel).ifBlank { currentProvider.defaultModel }
@@ -1223,11 +1267,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         page.findStatus.visibility = View.VISIBLE
         page.findScroll.visibility = View.VISIBLE
         page.findResults.removeAllViews()
+        val cloneOk = !AppState.downloadBusy && !AppState.findBusy
         if (AppState.findNewsTab) {
             val cached = FossFeed.projects(this)
             if (cached.isNotEmpty()) {
                 page.findResults.addView(sectionLabel("This week"))
-                for (hit in cached) page.findResults.addView(repoRow(hit))
+                for (hit in cached) page.findResults.addView(repoRow(hit, cloneOk))
             }
             var group = ""
             for (channel in FossFeed.channels) {
@@ -1253,14 +1298,15 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                     val repo = story.repo
                     if (repo != null) {
                         row.newsClone.visibility = View.VISIBLE
-                        row.newsClone.text = "Clone ${repo.name}"
-                        row.newsClone.setOnClickListener { downloadHit(repo) }
+                        row.newsClone.text = if (AppState.downloadBusy) "Cloning…" else "Clone ${repo.name}"
+                        BusyUi.setEnabled(row.newsClone, cloneOk)
+                        row.newsClone.setOnClickListener { if (cloneOk) downloadHit(repo) }
                     }
                     page.findResults.addView(row.root)
                 }
             }
         } else {
-            for (hit in AppState.findHits) page.findResults.addView(repoRow(hit))
+            for (hit in AppState.findHits) page.findResults.addView(repoRow(hit, cloneOk))
         }
     }
 
@@ -1273,7 +1319,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
     }
 
-    private fun repoRow(hit: FossSearch.RepoHit): View {
+    private fun repoRow(hit: FossSearch.RepoHit, cloneOk: Boolean = true): View {
         val row = RowFossBinding.inflate(layoutInflater, null, false)
         row.fossName.text = hit.name
         val source = hit.why
@@ -1286,7 +1332,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             else -> hostOf(hit.page)
         }
         row.fossWhy.text = if (fromCache) hit.blurb else hit.why.ifBlank { hit.blurb }
-        row.root.setOnClickListener { downloadHit(hit) }
+        BusyUi.setEnabled(row.root, cloneOk)
+        row.root.setOnClickListener { if (cloneOk) downloadHit(hit) }
         return row.root
     }
 
@@ -1315,13 +1362,14 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun downloadHit(hit: FossSearch.RepoHit) {
-        if (AppState.downloadBusy) return
+        if (AppState.downloadBusy || AppState.importBusy) return
         if (editing) closeEditor(save = true)
         AppState.downloadBusy = true
         AppState.downloadNote = "Downloading ${hit.name}…"
         saveEditor(announce = false)
         binding.bottomNav.selectedItemId = R.id.nav_files
         refreshFileList()
+        paintBusy()
         AppState.log("clone ${hit.cloneUrl}")
         val app = applicationContext
         val job = startJob("Cloning ${hit.name}", AppState.Tab.FILES)
@@ -1353,6 +1401,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 AppState.downloadBusy = false
                 AppState.downloadNote = null
                 UiBridge.filesChanged()
+                UiBridge.busyUpdate()
                 if (failed == null) Jobs.end(job, "Clone finished", "${hit.name} is open in Files.")
                 else Jobs.end(job, "Clone failed", failed.orEmpty())
             }
@@ -1552,10 +1601,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         prompt.requestFocus()
     }
 
-    private fun vibeRoot(): File? {
+    private fun vibeRoot(): File? = AppState.selectedRoot()
+
+    private fun ensureProject(root: File) {
         val open = runCatching { AppState.projectRoot() }.getOrNull()
-        if (open != null && WorkspaceStore.contains(open)) return open
-        return WorkspaceStore.activeRepos().singleOrNull()
+        if (open?.canonicalFile != root.canonicalFile) openProject(root)
     }
 
     private fun renderVibeRepo() {
@@ -1566,6 +1616,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         page.vibeRepoPick.isEnabled = !AppState.vibeBusy
         page.vibeRepoBar.isEnabled = !AppState.vibeBusy
         page.vibeMention.isEnabled = !AppState.vibeBusy
+        page.provider.isEnabled = !AppState.vibeBusy
+        page.vibePrompt.isEnabled = !AppState.vibeBusy
+        page.autoTest.isEnabled = !AppState.vibeBusy
         page.vibePrompt.hint = if (repo == null) {
             "Pick a project, or ask for a new one · @ to reference"
         } else {
@@ -1744,6 +1797,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 page.understandStatus.setTextColor(getColor(R.color.accent))
             }
         }
+        paintBusy()
     }
 
     private fun runUnderstand() {
@@ -1758,9 +1812,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             pickUnderstandRepo()
             return
         }
-        if (runCatching { AppState.projectRoot() }.getOrNull()?.canonicalFile != root.canonicalFile) {
-            openProject(root)
-        }
+        ensureProject(root)
         saveEditor(announce = false)
         saveProvider(currentProvider)
         val provider = currentProvider
@@ -2036,15 +2088,25 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun createRelease() {
+        if (AppState.gitBusy) return
         val name = binding.gitPage.releaseName.text?.toString()?.trim().orEmpty()
         val notes = binding.gitPage.releaseNotes.text?.toString()?.trim().orEmpty()
         if (name.isEmpty()) {
             AppState.log("Release needs a name")
             return
         }
+        AppState.gitBusy = true
+        onGit()
+        val job = startJob("Create release", AppState.Tab.GIT)
         AppState.io.execute {
-            val text = GitOps.createTag(AppState.cwd, AppState.reposDir, name, notes)
+            val text = try {
+                GitOps.createTag(AppState.cwd, AppState.reposDir, name, notes)
+            } catch (t: Throwable) {
+                t.message ?: t.javaClass.simpleName
+            }
             val tags = runCatching { GitOps.tags(AppState.cwd, AppState.reposDir) }.getOrDefault(emptyList())
+            AppState.gitBusy = false
+            Jobs.end(job, "Release finished", text)
             runOnUiThread {
                 AppState.log(text)
                 renderReleases(tags)
@@ -2052,6 +2114,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                     binding.gitPage.releaseName.setText("")
                     binding.gitPage.releaseNotes.setText("")
                 }
+                onGit()
             }
         }
     }
@@ -2470,6 +2533,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             binding.filesPage.filesProjects.visibility = View.VISIBLE
             binding.filesPage.filesSave.visibility = View.GONE
             binding.filesPage.filesClose.visibility = View.GONE
+            paintFilesBusy()
             syncBack()
         }
     }
@@ -2575,9 +2639,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             pickVibeRepo()
             return
         }
-        if (root != null && runCatching { AppState.projectRoot() }.getOrNull()?.canonicalFile != root.canonicalFile) {
-            openProject(root)
-        }
+        if (root != null) ensureProject(root)
         saveEditor(announce = false)
         saveProvider(currentProvider)
         binding.vibePage.vibePrompt.setText("")
@@ -2740,6 +2802,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun pickFolder() {
+        if (AppState.importBusy || AppState.downloadBusy) return
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
@@ -2747,9 +2810,14 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     }
 
     private fun startImport(uri: Uri) {
+        if (AppState.importBusy || AppState.downloadBusy) return
         saveEditor(announce = false)
         val app = applicationContext
+        AppState.importBusy = true
+        AppState.downloadNote = "Importing folder…"
         AppState.log("importing folder…")
+        refreshFileList()
+        paintBusy()
         val job = startJob("Importing folder", AppState.Tab.FILES)
         AppState.io.execute {
             try {
@@ -2765,6 +2833,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 val msg = t.message ?: t.javaClass.simpleName
                 AppState.log("open failed: $msg")
                 Jobs.end(job, "Import failed", msg)
+            } finally {
+                AppState.importBusy = false
+                AppState.downloadNote = null
+                UiBridge.filesChanged()
+                UiBridge.busyUpdate()
             }
         }
     }
@@ -2944,7 +3017,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             row.sectionAction.visibility = View.VISIBLE
             row.sectionAction.setImageResource(actionIcon)
             row.sectionAction.contentDescription = actionLabel
+            BusyUi.setEnabled(row.sectionAction, !AppState.gitBusy)
             row.sectionAction.setOnClickListener {
+                if (AppState.gitBusy) return@setOnClickListener
                 runGit {
                     AppState.gitDetail = null
                     action()
@@ -2998,9 +3073,14 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         row.gitMark.setImageResource(if (stage) R.drawable.ic_git_plus else R.drawable.ic_git_minus)
         row.gitMark.contentDescription = if (stage) "Stage" else "Unstage"
         row.gitDiscard.visibility = if (stage) View.VISIBLE else View.GONE
-        row.gitDiscard.setOnClickListener { confirmDiscard(change) }
-        row.root.setOnClickListener { showChangeMenu(change) }
+        val enabled = !AppState.gitBusy
+        BusyUi.setEnabled(row.root, enabled)
+        BusyUi.setEnabled(row.gitMark, enabled)
+        BusyUi.setEnabled(row.gitDiscard, enabled)
+        row.gitDiscard.setOnClickListener { if (enabled) confirmDiscard(change) }
+        row.root.setOnClickListener { if (enabled) showChangeMenu(change) }
         row.gitMark.setOnClickListener {
+            if (!enabled) return@setOnClickListener
             runGit {
                 AppState.gitDetail = null
                 if (stage) GitOps.stage(AppState.cwd, AppState.reposDir, change.path)

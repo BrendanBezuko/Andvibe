@@ -46,6 +46,8 @@ object AppState {
     var findNote: String = ""
     @Volatile var downloadBusy = false
     @Volatile var downloadNote: String? = null
+    @Volatile var importBusy = false
+    @Volatile var consoleBusy = false
 
     @Volatile var buildBusy = false
     @Volatile var reviseBusy = false
@@ -92,6 +94,28 @@ object AppState {
     }
 
     fun workBusy(): Boolean = vibeBusy || buildBusy || reviseBusy || understandBusy
+
+    fun anyBusy(): Boolean =
+        vibeBusy || buildBusy || reviseBusy || understandBusy ||
+            gitBusy || findBusy || downloadBusy || importBusy || consoleBusy || feedBusy ||
+            Jobs.active().isNotEmpty()
+
+    fun busyLabel(): String? {
+        Jobs.active().lastOrNull()?.let { return "${it.label}…" }
+        return when {
+            vibeBusy -> "Agent working…"
+            buildBusy -> "Building…"
+            reviseBusy -> "Revising…"
+            understandBusy -> "Understanding…"
+            gitBusy -> "Git working…"
+            downloadBusy -> downloadNote ?: "Downloading…"
+            importBusy -> "Importing…"
+            findBusy -> "Searching…"
+            consoleBusy -> "Running command…"
+            feedBusy -> "Refreshing feed…"
+            else -> null
+        }
+    }
 
     fun fitWorkspace(toRoot: Boolean = false): Boolean {
         if (!toRoot && WorkspaceStore.contains(cwd)) return false
@@ -162,6 +186,7 @@ object UiBridge {
         fun onProject()
         fun onMcp()
         fun onUsage()
+        fun onBusy()
         fun onScreenshot(tab: AppState.Tab?, done: (Bitmap?) -> Unit)
     }
 
@@ -174,6 +199,10 @@ object UiBridge {
 
     fun filesChanged() {
         main.post { listener?.onFiles() }
+    }
+
+    fun busyUpdate() {
+        main.post { listener?.onBusy() }
     }
 
     fun open(file: File) {

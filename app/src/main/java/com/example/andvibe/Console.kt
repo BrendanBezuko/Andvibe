@@ -228,3 +228,18 @@ HTML projects open in a preview.
 }
 
 fun AppState.projectRoot(): File = RepoFiles.projectRoot(cwd, reposDir)
+
+/** Open project for Vibe / Understand / PROJECT bar. Prefers cwd, then last remembered. */
+fun AppState.selectedRoot(): File? {
+    val open = runCatching { projectRoot() }.getOrNull()
+    if (open != null && open.canonicalFile != reposDir.canonicalFile && WorkspaceStore.contains(open)) {
+        return open
+    }
+    val remembered = ProjectStore.restore(appContext, reposDir) ?: return WorkspaceStore.activeRepos().singleOrNull()
+    val root = runCatching { RepoFiles.projectRoot(remembered, reposDir) }.getOrNull()
+        ?: remembered.takeIf { it.isDirectory }
+    if (root != null && root.canonicalFile != reposDir.canonicalFile && WorkspaceStore.contains(root)) {
+        return root
+    }
+    return WorkspaceStore.activeRepos().singleOrNull()
+}
