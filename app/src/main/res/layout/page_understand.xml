@@ -94,9 +94,18 @@
             style="?attr/borderlessButtonStyle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:layout_weight="0.9"
             android:text="Save" />
+
+        <Button
+            android:id="@+id/understandSource"
+            style="?attr/borderlessButtonStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_weight="0.9"
+            android:text="Source" />
     </LinearLayout>
 
     <FrameLayout
@@ -105,11 +114,18 @@
         android:layout_marginTop="10dp"
         android:layout_weight="1">
 
+        <WebView
+            android:id="@+id/understandWeb"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
         <ScrollView
             android:id="@+id/understandScroll"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:fillViewport="true">
+            android:fillViewport="true"
+            android:visibility="gone">
 
             <TextView
                 android:id="@+id/understandOut"

@@ -79,7 +79,7 @@ Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a fi
 
 Open a project, then open the Understand tab (brain icon). Optionally type a focus, such as the agent loop or the build path. Tap **Understand**.
 
-The phone scans the repo for function and method signatures, packs a file tree and a few key file heads, and asks the model selected on the Vibe tab for an overview, a Mermaid flow diagram, and a Mermaid sequence diagram. The scanned function defs are appended to the markdown. Keys stay on the phone. Tap **Save** to write `UNDERSTAND.md` in the repo root. If that file already exists, the tab loads it when you open the project.
+The phone scans the repo for function and method signatures, packs a file tree and a few key file heads, and asks the model selected on the Vibe tab for an overview, a Mermaid flow diagram, and a Mermaid sequence diagram. The scanned function defs are appended to the markdown. The tab renders that markdown in place, including the diagrams. Tap **Source** for the raw text. Keys stay on the phone. Tap **Save** to write `UNDERSTAND.md` in the repo root. If that file already exists, the tab loads it when you open the project.
 
 ## Vibe
 

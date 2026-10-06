@@ -24,6 +24,9 @@ import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
@@ -67,6 +70,9 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private val apiKeys = linkedMapOf<Provider, EditText>()
     private var settingsOpen = false
     private var workspaceOpen = false
+    private var understandShowSource = false
+    private var understandRendered = ""
+    private var mermaidJs: ByteArray? = null
     private var mentionPopup: ListPopupWindow? = null
     private var mentionEditing = false
     private val mentionNames = mutableListOf<String>()
@@ -487,6 +493,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         if (!AppState.understandBusy) {
             AppState.understandText = ""
             AppState.understandNote = ""
+            understandRendered = ""
+            understandShowSource = false
             maybeLoadUnderstandDoc()
         }
         if (AppState.tab == AppState.Tab.UNDERSTAND) onUnderstand() else renderUnderstandRepo()
@@ -1587,9 +1595,46 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val page = binding.understandPage
         page.understandRun.setOnClickListener { runUnderstand() }
         page.understandSave.setOnClickListener { saveUnderstand() }
+        page.understandSource.setOnClickListener {
+            if (AppState.understandText.isBlank()) return@setOnClickListener
+            understandShowSource = !understandShowSource
+            renderUnderstand()
+        }
         page.understandRepoPick.setOnClickListener { pickUnderstandRepo() }
         page.understandRepoBar.setOnClickListener { pickUnderstandRepo() }
+        setupUnderstandWeb(page.understandWeb)
         maybeLoadUnderstandDoc()
+    }
+
+    private fun setupUnderstandWeb(web: WebView) {
+        web.setBackgroundColor(getColor(R.color.bg))
+        web.settings.javaScriptEnabled = true
+        web.settings.domStorageEnabled = true
+        web.settings.allowFileAccess = false
+        web.settings.allowContentAccess = false
+        @Suppress("DEPRECATION")
+        web.settings.allowFileAccessFromFileURLs = false
+        @Suppress("DEPRECATION")
+        web.settings.allowUniversalAccessFromFileURLs = false
+        web.settings.useWideViewPort = true
+        web.settings.loadWithOverviewMode = true
+        web.settings.builtInZoomControls = true
+        web.settings.displayZoomControls = false
+        web.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) =
+                interceptUnderstandAsset(request)
+        }
+    }
+
+    private fun interceptUnderstandAsset(request: WebResourceRequest): android.webkit.WebResourceResponse? {
+        val uri = request.url ?: return null
+        if (uri.host != UnderstandDoc.HOST) return null
+        val name = uri.lastPathSegment ?: return UnderstandDoc.missing()
+        if (name != "mermaid.min.js") return UnderstandDoc.missing()
+        val bytes = mermaidJs ?: runCatching {
+            assets.open("understand/mermaid.min.js").use { it.readBytes() }
+        }.getOrNull()?.also { mermaidJs = it } ?: return UnderstandDoc.missing()
+        return UnderstandDoc.asset(name, bytes, "application/javascript")
     }
 
     private fun renderUnderstandRepo() {
@@ -1617,6 +1662,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                     openProject(dirs[which])
                     AppState.understandText = ""
                     AppState.understandNote = ""
+                    understandRendered = ""
+                    understandShowSource = false
                     maybeLoadUnderstandDoc()
                     renderUnderstand()
                 }
@@ -1639,11 +1686,35 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         renderUnderstandRepo()
         val text = AppState.understandText
         val has = text.isNotBlank()
-        page.understandOut.text = text
-        page.understandOut.visibility = if (has) View.VISIBLE else View.GONE
         page.understandEmpty.visibility = if (has) View.GONE else View.VISIBLE
         page.understandSave.isEnabled = has && !AppState.understandBusy
+        page.understandSource.isEnabled = has
+        page.understandSource.text = if (understandShowSource) "View" else "Source"
         page.understandFocus.isEnabled = !AppState.understandBusy
+        if (!has) {
+            understandRendered = ""
+            page.understandWeb.visibility = View.GONE
+            page.understandScroll.visibility = View.GONE
+            page.understandOut.text = ""
+            if (page.understandWeb.url != null) page.understandWeb.loadUrl("about:blank")
+        } else if (understandShowSource) {
+            page.understandWeb.visibility = View.GONE
+            page.understandScroll.visibility = View.VISIBLE
+            page.understandOut.text = text
+        } else {
+            page.understandScroll.visibility = View.GONE
+            page.understandWeb.visibility = View.VISIBLE
+            if (text != understandRendered) {
+                understandRendered = text
+                page.understandWeb.loadDataWithBaseURL(
+                    "https://${UnderstandDoc.HOST}/",
+                    UnderstandDoc.page(text),
+                    "text/html",
+                    "utf-8",
+                    null
+                )
+            }
+        }
         when {
             !AppState.understandBusy -> {
                 page.understandRun.isEnabled = true
@@ -1711,6 +1782,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.understandStop.set(false)
         AppState.understandNote = "Starting"
         AppState.understandText = ""
+        understandRendered = ""
+        understandShowSource = false
         UiBridge.understandUpdate()
         val job = startJob("Understanding ${root.name}", AppState.Tab.UNDERSTAND)
         AppState.io.execute {
