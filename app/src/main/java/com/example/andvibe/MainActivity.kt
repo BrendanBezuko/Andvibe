@@ -353,7 +353,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.buildPage.buildApk.isEnabled = !busy
         binding.buildPage.buildApk.text = if (AppState.buildBusy) "Building…" else "Build APK"
         binding.buildPage.reviseBuild.isEnabled = !busy && text.isNotBlank()
-        binding.buildPage.reviseBuild.text = if (AppState.reviseBusy) "Revising…" else "Revise"
+        binding.buildPage.reviseBuild.contentDescription =
+            if (AppState.reviseBusy) "Revising…" else "Revise"
         if (nearBottom && text.isNotBlank()) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
