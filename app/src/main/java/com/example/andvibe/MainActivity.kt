@@ -230,7 +230,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val page = binding.consolePage
         val running = AppState.consoleBusy
         BusyUi.setEnabled(page.commandRun, !running)
-        page.commandInput.isEnabled = !running
+        BusyUi.setEnabled(page.commandInput, !running)
     }
 
     private fun paintFilesBusy() {
@@ -326,15 +326,15 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val send = binding.vibePage.vibeSend
         when {
             !AppState.vibeBusy -> {
-                send.isEnabled = true
+                BusyUi.setEnabled(send, true)
                 send.text = "Send"
             }
             AppState.agentStop.get() -> {
-                send.isEnabled = false
-                send.text = "Stopping…"
+                BusyUi.setEnabled(send, false)
+                send.text = "Stop"
             }
             else -> {
-                send.isEnabled = true
+                BusyUi.setEnabled(send, true)
                 send.text = "Stop"
             }
         }
@@ -381,12 +381,10 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
         page.buildStatus.text = status
         page.buildStatus.setTextColor(getColor(statusColor))
+        binding.buildPage.installApk.isEnabled = apkReady
         BusyUi.setEnabled(binding.buildPage.installApk, apkReady && !busy)
         BusyUi.setEnabled(binding.buildPage.buildApk, !busy)
-        binding.buildPage.buildApk.text = if (AppState.buildBusy) "Building…" else "Build APK"
         BusyUi.setEnabled(binding.buildPage.reviseBuild, !busy && text.isNotBlank())
-        binding.buildPage.reviseBuild.contentDescription =
-            if (AppState.reviseBusy) "Revising…" else "Revise"
         paintBusy()
         if (nearBottom && text.isNotBlank()) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
@@ -446,8 +444,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         BusyUi.setEnabled(page.gitCommit, enabled)
         BusyUi.setEnabled(page.gitSuggest, enabled && snap?.isRepo == true && snap.changes.isNotEmpty())
         BusyUi.setEnabled(page.createRelease, enabled)
-        page.releaseName.isEnabled = enabled
-        page.releaseNotes.isEnabled = enabled
+        BusyUi.setEnabled(page.releaseName, enabled)
+        BusyUi.setEnabled(page.releaseNotes, enabled)
         paintBusy()
         syncBack()
     }
@@ -948,12 +946,14 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         fillColumn(binding.boardPage.ideaCards, binding.boardPage.ideaEmpty, WorkspaceStore.Column.IDEA)
         fillColumn(binding.boardPage.bugCards, binding.boardPage.bugEmpty, WorkspaceStore.Column.BUG)
         fillColumn(binding.boardPage.solutionCards, binding.boardPage.solutionEmpty, WorkspaceStore.Column.SOLUTION)
+        fillColumn(binding.boardPage.completedCards, binding.boardPage.completedEmpty, WorkspaceStore.Column.COMPLETED)
     }
 
     private fun fillColumn(parent: LinearLayout, empty: android.widget.TextView, column: WorkspaceStore.Column) {
         parent.removeAllViews()
         val cards = WorkspaceStore.cards(column)
         empty.visibility = if (cards.isEmpty()) View.VISIBLE else View.GONE
+        val done = column == WorkspaceStore.Column.COMPLETED
         for (card in cards) {
             val row = RowCardBinding.inflate(layoutInflater, parent, false)
             row.cardTitle.text = card.title
@@ -963,19 +963,28 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 row.cardBody.visibility = View.VISIBLE
                 row.cardBody.text = card.body
             }
-            row.root.setOnClickListener { buildCard(card) }
-            row.root.setOnLongClickListener {
-                showCardMenu(card)
-                true
+            if (done) {
+                row.root.setOnClickListener { showCardMenu(card) }
+            } else {
+                row.root.setOnClickListener { buildCard(card) }
+                row.root.setOnLongClickListener {
+                    showCardMenu(card)
+                    true
+                }
             }
             parent.addView(row.root)
         }
     }
 
     private fun showCardMenu(card: WorkspaceStore.Card) {
-        val labels = mutableListOf("Build", "Edit")
+        val done = card.column == WorkspaceStore.Column.COMPLETED.id
+        val labels = mutableListOf<String>()
         val actions = mutableListOf<() -> Unit>()
-        actions.add { buildCard(card) }
+        if (!done) {
+            labels.add("Build")
+            actions.add { buildCard(card) }
+        }
+        labels.add("Edit")
         actions.add { editCard(card, card.column) }
         for (column in WorkspaceStore.Column.entries) {
             if (column.id == card.column) continue
@@ -1003,13 +1012,19 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             ).show()
             return
         }
-        startVibe(cardInstruction(card))
+        val instruction = cardInstruction(card)
+        if (card.column != WorkspaceStore.Column.COMPLETED.id) {
+            WorkspaceStore.moveCard(card.id, WorkspaceStore.Column.COMPLETED.id)
+            renderBoard()
+        }
+        startVibe(instruction)
     }
 
     private fun cardInstruction(card: WorkspaceStore.Card): String {
         val lead = when (card.column) {
             WorkspaceStore.Column.BUG.id -> "Fix this bug from the Board."
             WorkspaceStore.Column.SOLUTION.id -> "Implement this solution from the Board."
+            WorkspaceStore.Column.COMPLETED.id -> "Revisit this completed Board item."
             else -> "Implement this feature from the Board."
         }
         return buildString {
@@ -1388,7 +1403,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private fun renderFind() {
         val page = binding.searchPage
         BusyUi.setEnabled(page.findGo, !AppState.findBusy)
-        page.findGo.text = if (AppState.findBusy) "Searching…" else "Search"
         val note = AppState.findNote
         val model = store.get(currentProvider, "model", currentProvider.defaultModel).ifBlank { currentProvider.defaultModel }
         page.findStatus.text = when {
@@ -1431,7 +1445,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                     val repo = story.repo
                     if (repo != null) {
                         row.newsClone.visibility = View.VISIBLE
-                        row.newsClone.text = if (AppState.downloadBusy) "Cloning…" else "Clone ${repo.name}"
+                        row.newsClone.text = "Clone ${repo.name}"
                         BusyUi.setEnabled(row.newsClone, cloneOk)
                         row.newsClone.setOnClickListener { if (cloneOk) downloadHit(repo) }
                     }
@@ -1746,12 +1760,12 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val repo = if (AppState.vibeBusy) AppState.vibeRepo else vibeRoot()
         page.vibeRepo.text = repo?.name ?: "No repo selected"
         page.vibeRepo.setTextColor(getColor(if (repo == null) R.color.muted else R.color.accent))
-        page.vibeRepoPick.isEnabled = !AppState.vibeBusy
-        page.vibeRepoBar.isEnabled = !AppState.vibeBusy
-        page.vibeMention.isEnabled = !AppState.vibeBusy
-        page.provider.isEnabled = !AppState.vibeBusy
-        page.vibePrompt.isEnabled = !AppState.vibeBusy
-        page.autoTest.isEnabled = !AppState.vibeBusy
+        BusyUi.setEnabled(page.vibeRepoPick, !AppState.vibeBusy)
+        BusyUi.setEnabled(page.vibeRepoBar, !AppState.vibeBusy)
+        BusyUi.setEnabled(page.vibeMention, !AppState.vibeBusy)
+        BusyUi.setEnabled(page.provider, !AppState.vibeBusy)
+        BusyUi.setEnabled(page.vibePrompt, !AppState.vibeBusy)
+        BusyUi.setEnabled(page.autoTest, !AppState.vibeBusy)
         page.vibePrompt.hint = if (repo == null) {
             "Pick a project, or ask for a new one · @ to reference"
         } else {
@@ -1829,8 +1843,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val repo = if (AppState.understandBusy) AppState.understandRepo else vibeRoot()
         page.understandRepo.text = repo?.name ?: "No repo selected"
         page.understandRepo.setTextColor(getColor(if (repo == null) R.color.muted else R.color.accent))
-        page.understandRepoPick.isEnabled = !AppState.understandBusy
-        page.understandRepoBar.isEnabled = !AppState.understandBusy
+        BusyUi.setEnabled(page.understandRepoPick, !AppState.understandBusy)
+        BusyUi.setEnabled(page.understandRepoBar, !AppState.understandBusy)
     }
 
     private fun pickUnderstandRepo() {
@@ -1874,10 +1888,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val text = AppState.understandText
         val has = text.isNotBlank()
         page.understandEmpty.visibility = if (has) View.GONE else View.VISIBLE
-        page.understandSave.isEnabled = has && !AppState.understandBusy
+        page.understandSave.isEnabled = has
+        BusyUi.setEnabled(page.understandSave, has && !AppState.understandBusy)
         page.understandSource.isEnabled = has
         page.understandSource.text = if (understandShowSource) "View" else "Source"
-        page.understandFocus.isEnabled = !AppState.understandBusy
+        BusyUi.setEnabled(page.understandFocus, !AppState.understandBusy)
         if (!has) {
             understandRendered = ""
             page.understandWeb.visibility = View.GONE
@@ -1904,7 +1919,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
         when {
             !AppState.understandBusy -> {
-                page.understandRun.isEnabled = true
+                BusyUi.setEnabled(page.understandRun, true)
                 page.understandRun.text = "Understand"
                 page.understandStatus.text = when {
                     AppState.understandNote.isNotBlank() -> "● ${AppState.understandNote.uppercase(Locale.US)}"
@@ -1918,13 +1933,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 )
             }
             AppState.understandStop.get() -> {
-                page.understandRun.isEnabled = false
-                page.understandRun.text = "Stopping…"
-                page.understandStatus.text = "● STOPPING"
-                page.understandStatus.setTextColor(getColor(R.color.quote))
+                BusyUi.setEnabled(page.understandRun, false)
+                page.understandRun.text = "Stop"
             }
             else -> {
-                page.understandRun.isEnabled = true
+                BusyUi.setEnabled(page.understandRun, true)
                 page.understandRun.text = "Stop"
                 page.understandStatus.text = "● ${AppState.understandNote.ifBlank { "WORKING" }.uppercase(Locale.US)}"
                 page.understandStatus.setTextColor(getColor(R.color.accent))
@@ -2052,7 +2065,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         list.removeAllViews()
         val chats = ChatStore.chats()
         page.historyEmpty.visibility = if (chats.isEmpty()) View.VISIBLE else View.GONE
-        page.newChat.isEnabled = !AppState.vibeBusy
+        BusyUi.setEnabled(page.newChat, !AppState.vibeBusy)
         val active = ChatStore.activeId()
         val stamp = java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault())
         for (chat in chats) {
