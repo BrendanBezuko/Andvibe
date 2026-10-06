@@ -20,7 +20,6 @@ import java.util.concurrent.atomic.AtomicReference
 object AppState {
     enum class Tab { CONSOLE, BOARD, FILES, SEARCH, GIT, VIBE, UNDERSTAND, BUILD }
 
-    val agentStop = AtomicBoolean(false)
     val agentSteps = mutableListOf<String>()
     val history = ArrayDeque<Pair<String, String>>()
     val chat = mutableListOf<Pair<String, String>>()

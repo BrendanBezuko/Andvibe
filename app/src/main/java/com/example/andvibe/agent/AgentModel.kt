@@ -1,237 +1,14 @@
-package com.example.andvibe
+package com.example.andvibe.agent
 
-import com.example.andvibe.core.GitOps
-import com.example.andvibe.core.RepoFiles
-
+import com.example.andvibe.AiClient
+import com.example.andvibe.Provider
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
 
-data class AgentResult(val text: String, val changed: List<File>, val steps: Int)
-
-class AgentJob(
-    val ctx: AgentContext,
-    val cwd: File,
-    val open: File?,
-    val task: String,
-    val provider: Provider,
-    val key: String,
-    val model: String,
-    val base: String,
-    val earlier: List<Pair<String, String>>,
-    val stop: AtomicBoolean
-)
-
-object Agent {
-    private const val MAX_PLAN_STEPS = 12
-    private const val MAX_STEPS = 40
-    private const val MAX_RESULT = 20_000
-    private const val COMPACT_AT = 300_000
-
-    private val planPrompt get() = PromptStore.get(PromptStore.Kind.PLAN)
-    private val systemPrompt get() = PromptStore.get(PromptStore.Kind.AGENT)
-
-    fun run(job: AgentJob, onStep: (String) -> Unit): AgentResult {
-        if (job.task.length > 16_000) error("prompt is too long")
-        if (job.key.isBlank()) error("add an API key in Settings")
-        if (job.model.isBlank()) error("set a model name")
-        if (job.model.any { it.isWhitespace() }) error("model name has a space")
-        val baseUrl = job.base.ifBlank { job.provider.defaultBase }
-        if (baseUrl.isBlank()) error("set a base URL")
-        if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
-            error("base URL must start with https://")
-        }
-        val context = firstMessage(job)
-        onStep("Planning…")
-        val planned = phase(
-            job = job,
-            model = makeModel(job, baseUrl),
-            system = planPrompt,
-            tools = AgentTools.planSpecs,
-            user = context,
-            maxSteps = MAX_PLAN_STEPS,
-            onStep = onStep,
-            label = "plan"
-        )
-        if (job.stop.get()) {
-            return finish(job, "Stopped during planning. ${planned.text}".trim(), planned.steps)
-        }
-        val plan = planned.text.trim().ifBlank { "No detailed plan. Explore briefly, then make the smallest change that finishes the task." }
-        onStep("Plan ready")
-        onStep(plan.take(600))
-        val executeUser = buildString {
-            append(context)
-            append("\n\nAgreed plan:\n")
-            append(plan)
-            append("\n\nFollow that plan. Explore only what you still need, then edit.")
-        }
-        onStep("Executing…")
-        val done = phase(
-            job = job,
-            model = makeModel(job, baseUrl),
-            system = systemPrompt,
-            tools = AgentTools.specs,
-            user = executeUser,
-            maxSteps = MAX_STEPS,
-            onStep = onStep,
-            label = "agent"
-        )
-        val total = planned.steps + done.steps
-        if (job.stop.get()) {
-            return finish(job, "Stopped. ${done.text}".trim(), total)
-        }
-        return finish(job, done.text.trim().ifBlank { "Done." }, total)
-    }
-
-    private data class PhaseResult(val text: String, val steps: Int)
-
-    private fun phase(
-        job: AgentJob,
-        model: AgentModel,
-        system: String,
-        tools: List<ToolSpec>,
-        user: String,
-        maxSteps: Int,
-        onStep: (String) -> Unit,
-        label: String
-    ): PhaseResult {
-        model.start(system, tools, user)
-        var lastText = ""
-        for (step in 1..maxSteps) {
-            if (job.stop.get()) return PhaseResult(lastText, step - 1)
-            val turn = model.step()
-            val input = if (turn.input > 0) turn.input else AiClient.guessTokens(model.size())
-            val output = if (turn.output > 0) turn.output else AiClient.guessTokens(turn.text.length + 200)
-            WorkspaceStore.addUse(job.model, input, output)
-            UiBridge.usageUpdate()
-            if (turn.calls.isEmpty()) {
-                return PhaseResult(turn.text.trim().ifBlank { lastText }, step)
-            }
-            if (turn.text.isNotBlank()) {
-                lastText = turn.text.trim()
-                onStep(lastText.take(400))
-            }
-            val results = mutableListOf<ToolResult>()
-            for (call in turn.calls) {
-                if (job.stop.get()) {
-                    results.add(ToolResult(call, "the user stopped the run", true))
-                    continue
-                }
-                onStep("→ " + AgentTools.label(call.name, call.args))
-                val result = if (call.badArgs != null) {
-                    ToolResult(call, "arguments were not valid JSON: ${call.badArgs.take(300)}", true)
-                } else {
-                    try {
-                        val out = AgentTools.run(call.name, call.args, job.ctx)
-                        ToolResult(call, clip(out), false)
-                    } catch (t: Throwable) {
-                        ToolResult(call, "error: ${t.message ?: t.javaClass.simpleName}", true)
-                    }
-                }
-                DebugLog.step(label, "${call.name} error=${result.error} chars=${result.output.length}")
-                summary(call.name, result)?.let { onStep("   $it") }
-                if (call.name in WRITES && !result.error) UiBridge.filesChanged()
-                results.add(result)
-            }
-            model.addResults(results)
-            if (model.size() > COMPACT_AT) model.compact(keep = 6)
-        }
-        return PhaseResult(
-            lastText.ifBlank { "Stopped after $maxSteps $label steps." },
-            maxSteps
-        )
-    }
-
-    private fun makeModel(job: AgentJob, baseUrl: String): AgentModel {
-        return when (job.provider) {
-            Provider.ANTHROPIC -> AnthropicModel(baseUrl, job.key, job.model)
-            Provider.GEMINI -> GeminiModel(baseUrl, job.key, job.model)
-            Provider.OPENAI -> ResponsesModel(baseUrl, job.key, job.model)
-            else -> if (baseUrl.contains("api.openai.com")) {
-                ResponsesModel(baseUrl, job.key, job.model)
-            } else {
-                OpenAiModel(baseUrl, job.key, job.model, job.provider)
-            }
-        }
-    }
-
-    private val WRITES = setOf("edit_file", "write_file", "delete_file")
-
-    private fun summary(name: String, result: ToolResult): String? {
-        val first = result.output.lineSequence().firstOrNull().orEmpty().take(200)
-        return when {
-            result.error -> first
-            name in WRITES || name == "cloud_build" || name == "run_js_tests" || name == "create_project" -> first
-            name == "grep" && first.startsWith("no matches") -> first
-            else -> null
-        }
-    }
-
-    private fun finish(job: AgentJob, text: String, steps: Int): AgentResult {
-        return AgentResult(text, job.ctx.changed.toList(), steps)
-    }
-
-    private fun clip(text: String): String {
-        if (text.length <= MAX_RESULT) return text
-        return text.take(MAX_RESULT) + "\n… cut ${text.length - MAX_RESULT} characters. Ask for a smaller range."
-    }
-
-    private fun firstMessage(job: AgentJob): String {
-        val root = job.ctx.root
-        val active = WorkspaceStore.activeRepos()
-        val others = active.map { it.name }.filter { it != root?.name }
-        val refs = ProjectMentions.dirsIn(job.task, active).filter { it.canonicalFile != root?.canonicalFile }
-        return buildString {
-            if (root == null) {
-                append("Repo: none selected\n")
-            } else {
-                append("Repo: ").append(root.name).append(" (every tool works only inside this repo)\n")
-                append("Working directory: ").append(RepoFiles.rel(job.cwd, root).ifBlank { "." }).append('\n')
-                job.open?.takeIf { it.isFile }?.let {
-                    append("Open in the editor: ").append(RepoFiles.rel(it, root)).append('\n')
-                }
-                append("Gradle wrapper: ").append(if (File(root, "gradlew").isFile) "yes, cloud_build works" else "no").append('\n')
-            }
-            if (others.isNotEmpty()) {
-                append("Other repos in this workspace (reference with @name; tools cannot edit them): ")
-                    .append(others.joinToString(", ")).append('\n')
-            }
-            if (root != null) {
-                append("\nFile tree (partial):\n").append(AiClient.tree(root, 150)).append("\n\n")
-                val status = runCatching { GitOps.status(root, job.ctx.repos) }.getOrNull()
-                if (!status.isNullOrBlank()) append("Git status:\n").append(status.take(3_000)).append("\n\n")
-                for (name in listOf("AGENTS.md", "CLAUDE.md", ".cursorrules")) {
-                    val file = File(root, name)
-                    if (file.isFile && file.length() < 200_000) {
-                        append("Repo instructions from ").append(name).append(":\n")
-                        append(file.readText().take(6_000)).append("\n\n")
-                        break
-                    }
-                }
-            } else {
-                append('\n')
-            }
-            for (ref in refs) {
-                append(ProjectMentions.contextBlock(ref))
-            }
-            if (job.earlier.isNotEmpty()) {
-                append("Earlier in this chat:\n")
-                for ((role, text) in job.earlier) {
-                    append(if (role == "user") "User: " else "You: ").append(text.take(1_500)).append('\n')
-                }
-                append('\n')
-            }
-            append("Task:\n").append(job.task)
-        }
-    }
+/** Blocking HTTP used by model adapters — inject fakes in JVM tests. */
+fun interface HttpPost {
+    fun post(url: String, headers: Map<String, String>, body: String): String
 }
-
-data class ToolCall(val id: String, val name: String, val args: JSONObject, val badArgs: String?)
-
-data class ToolResult(val call: ToolCall, val output: String, val error: Boolean)
-
-data class Turn(val text: String, val calls: List<ToolCall>, val input: Long, val output: Long)
 
 interface AgentModel {
     fun start(system: String, tools: List<ToolSpec>, user: String)
@@ -241,7 +18,28 @@ interface AgentModel {
     fun compact(keep: Int)
 }
 
-private abstract class SlotModel : AgentModel {
+object AgentModels {
+    fun create(
+        provider: Provider,
+        key: String,
+        model: String,
+        baseUrl: String,
+        http: HttpPost = HttpPost { url, headers, body -> AiClient.post(url, headers, body) },
+    ): AgentModel {
+        return when (provider) {
+            Provider.ANTHROPIC -> AnthropicModel(baseUrl, key, model, http)
+            Provider.GEMINI -> GeminiModel(baseUrl, key, model, http)
+            Provider.OPENAI -> ResponsesModel(baseUrl, key, model, http)
+            else -> if (baseUrl.contains("api.openai.com")) {
+                ResponsesModel(baseUrl, key, model, http)
+            } else {
+                OpenAiModel(baseUrl, key, model, provider, http)
+            }
+        }
+    }
+}
+
+internal abstract class SlotModel : AgentModel {
     private val slots = mutableListOf<Pair<JSONObject, String>>()
 
     protected fun slot(obj: JSONObject, key: String) {
@@ -267,10 +65,11 @@ private abstract class SlotModel : AgentModel {
     }
 }
 
-private class AnthropicModel(
+internal class AnthropicModel(
     private val base: String,
     private val key: String,
-    private val model: String
+    private val model: String,
+    private val http: HttpPost,
 ) : SlotModel() {
     private var system = ""
     private val tools = JSONArray()
@@ -368,7 +167,7 @@ private class AnthropicModel(
             .put("tools", tools)
             .put("messages", messages)
         val headers = mapOf("x-api-key" to key, "anthropic-version" to "2023-06-01")
-        return AiClient.post(AiClient.anthropicUrl(base), headers, body.toString())
+        return http.post(AiClient.anthropicUrl(base), headers, body.toString())
     }
 
     private fun markLast() {
@@ -381,11 +180,12 @@ private class AnthropicModel(
     }
 }
 
-private class OpenAiModel(
+internal class OpenAiModel(
     private val base: String,
     private val key: String,
     private val model: String,
-    private val provider: Provider
+    private val provider: Provider,
+    private val http: HttpPost,
 ) : SlotModel() {
     private val tools = JSONArray()
     private val messages = JSONArray()
@@ -468,14 +268,15 @@ private class OpenAiModel(
             .put("tools", tools)
             .put(tokenField, 16_000)
         val headers = mapOf("Authorization" to "Bearer $key") + AiClient.extraHeaders(provider)
-        return AiClient.post(AiClient.chatUrl(base), headers, body.toString())
+        return http.post(AiClient.chatUrl(base), headers, body.toString())
     }
 }
 
-private class ResponsesModel(
+internal class ResponsesModel(
     private val base: String,
     private val key: String,
-    private val model: String
+    private val model: String,
+    private val http: HttpPost,
 ) : SlotModel() {
     private var system = ""
     private val tools = JSONArray()
@@ -502,7 +303,7 @@ private class ResponsesModel(
             .put("input", input)
             .put("tools", tools)
             .put("max_output_tokens", 16_000)
-        val raw = AiClient.post(
+        val raw = http.post(
             AiClient.responsesUrl(base),
             mapOf("Authorization" to "Bearer $key"),
             body.toString()
@@ -548,10 +349,11 @@ private class ResponsesModel(
     override fun size(): Int = input.toString().length + system.length
 }
 
-private class GeminiModel(
+internal class GeminiModel(
     private val base: String,
     private val key: String,
-    model: String
+    model: String,
+    private val http: HttpPost,
 ) : SlotModel() {
     private val modelId = model.removePrefix("models/").trim()
     private var system = ""
@@ -577,7 +379,7 @@ private class GeminiModel(
             .put("contents", contents)
             .put("tools", JSONArray().put(JSONObject().put("functionDeclarations", declarations)))
             .put("generationConfig", JSONObject().put("maxOutputTokens", 16_000))
-        val raw = AiClient.post(
+        val raw = http.post(
             AiClient.geminiUrl(base, modelId),
             mapOf("x-goog-api-key" to key),
             body.toString()

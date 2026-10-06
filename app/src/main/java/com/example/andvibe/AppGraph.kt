@@ -3,8 +3,11 @@ package com.example.andvibe
 import android.app.Application
 import android.os.Handler
 import android.os.Looper
+import com.example.andvibe.agent.AgentRuntime
+import com.example.andvibe.agent.ToolRegistry
 import com.example.andvibe.core.GitOps
 import com.example.andvibe.tasks.AppDispatchers
+import com.example.andvibe.tasks.Res
 import com.example.andvibe.tasks.TaskRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +22,9 @@ class AppGraph(app: Application) {
     val secrets = SecretStore(app)
     val session: ProjectSession
     val tasks: TaskRunner
+    val buildService: BuildService
+    val toolRegistry: ToolRegistry
+    val agentRuntime: AgentRuntime
 
     init {
         session = ProjectSession(app)
@@ -44,5 +50,26 @@ class AppGraph(app: Application) {
             )
         }
         AppState.init(app, session)
+
+        buildService = BuildService(app, tasks)
+        toolRegistry = ToolRegistry(
+            cloudBuild = { root ->
+                buildService.agentCloudBuild(root, secrets.buildUrl(), secrets.buildToken())
+            },
+            includeProject = { name -> WorkspaceStore.include(name) },
+        )
+        agentRuntime = AgentRuntime(
+            tools = toolRegistry,
+            launchAgent = { block ->
+                tasks.launch(
+                    label = "Agent working",
+                    tab = AppState.Tab.VIBE,
+                    holds = setOf(Res.AGENT),
+                    on = dispatchers.agent,
+                    track = true,
+                    block = block,
+                )
+            },
+        )
     }
 }

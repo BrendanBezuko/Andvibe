@@ -18,7 +18,7 @@
 - [x] Phase 0: extract pure core (`ZipWriter`, `BoundedLog`) + 27 JVM tests
 - [x] Phase 1: `AppGraph` + `ProjectSession`; `SecretStore` app-scoped; kill `GitOps` globals
 - [x] Phase 2: `TaskRunner` (coroutines, cancellation, resource locks, busy derived)
-- [ ] Phase 3: `AgentRuntime` (event stream, `ToolRegistry`) + shared `BuildService`
+- [x] Phase 3: `AgentRuntime` (event stream, `ToolRegistry`) + shared `BuildService`
 - [ ] Phase 4: per-tab features (Search → Understand → Build → Console → Git → Vibe → rest);
       persist draft text (Vibe prompt, commit message) when touching those tabs
 - [ ] Phase 5: delete `AppState`/`UiBridge`; MainActivity → nav shell
@@ -44,10 +44,17 @@ Do these when already touching the file, never as standalone rebuild work:
 ## Should have
 - gitleaks (or similar) secret scan before pushing live repos.
 - Vulnerability scanner for vibed apps.
-- MobSF static scan as a Build tab step: MobSF Docker image on Cloud Run like the builder,
-  POST each APK to its REST API, show the report next to the VirusTotal result.
+- MobSF static scan as a Build tab step: MobSF Docker image on the self-hosted runner like
+  the builder, POST each APK to its REST API, show the report next to the VirusTotal result.
 - Migrate deprecated APIs: `ApkSigner.SignerConfig.Builder` constructor (ApkPackager.kt:47),
   `EncryptedSharedPreferences` (androidx.security-crypto is deprecated upstream).
+- Self-hosted Cloud Run replacement (not GCP-locked): pick a Docker host that can scale to
+  near-zero and stay simple to operate — Coolify first (best Cloud Run-like / complexity
+  tradeoff); Knative or K8s+Knative if true scale-to-zero is required; Dokku or plain
+  Docker+Caddy only if we accept weaker idle behavior. From the app, deploy/configure
+  arbitrary Docker images (builder, MobSF, and user-chosen services) automatically against
+  that host — same URL + token contract as today's `/build`, without naming Cloud Run.
+
 
 ## Could have
 - Voice agent.

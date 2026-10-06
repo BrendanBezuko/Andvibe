@@ -1,51 +1,30 @@
-package com.example.andvibe
+package com.example.andvibe.agent
 
 import com.example.andvibe.core.GitClient
-import com.example.andvibe.tasks.Res
 import com.example.andvibe.core.GitOps
 import com.example.andvibe.core.JsRunner
 import com.example.andvibe.core.RepoFiles
-
-import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-class AgentContext(
-    @Volatile var root: File?,
-    val repos: File,
-    val app: Context,
-    val buildUrl: String,
-    val buildToken: String
+/**
+ * Named tools with individual execute bodies (DESIGN.md §3.7).
+ * Replaces the monolithic AgentTools dispatch. No AppState / UiBridge.
+ */
+class ToolRegistry(
+    private val cloudBuild: (root: File) -> String,
+    private val includeProject: (String) -> Unit,
 ) {
-    val changed = linkedSetOf<File>()
-
-    val repo: File
-        get() = root ?: error(
-            "no repo is selected. Ask the user to pick one in the bottom PROJECT bar, " +
-                "or call create_project if they asked for a new project."
-        )
-}
-
-class ToolSpec(val name: String, val description: String, val schema: JSONObject)
-
-object AgentTools {
-    private const val MAX_READ_LINES = 600
-    private const val MAX_GREP_HITS = 200
-    private const val MAX_LIST = 400
-    private const val MAX_WRITE = 500_000
-
-    val specs: List<ToolSpec> = listOf(
-        ToolSpec(
-            "list_dir",
+    private val tools: List<RegisteredTool> = listOf(
+        tool("list_dir", plan = true,
             "List files and folders under a path in the repo. Folders end with /. Skips .git, build, node_modules, and .gradle.",
             schema(
                 "path" to prop("string", "Path relative to the repo root. Use . for the root."),
                 "depth" to prop("integer", "How many folder levels to show, 1 to 4. Default 1.")
             )
-        ),
-        ToolSpec(
-            "read_file",
+        ) { ctx, args -> listDir(ctx, args.optString("path", "."), args.optInt("depth", 1)) },
+        tool("read_file", plan = true,
             "Read a text file with line numbers. Reads at most $MAX_READ_LINES lines per call; pass start_line and end_line for more.",
             schema(
                 "path" to prop("string", "Path relative to the repo root."),
@@ -53,9 +32,10 @@ object AgentTools {
                 "end_line" to prop("integer", "Last line, inclusive."),
                 required = listOf("path")
             )
-        ),
-        ToolSpec(
-            "grep",
+        ) { ctx, args ->
+            readFile(ctx, args.optString("path"), args.optInt("start_line", 1), args.optInt("end_line", 0))
+        },
+        tool("grep", plan = true,
             "Search file contents with a regular expression. Returns path:line: text for each match, up to $MAX_GREP_HITS matches.",
             schema(
                 "pattern" to prop("string", "Java regular expression."),
@@ -64,9 +44,16 @@ object AgentTools {
                 "ignore_case" to prop("boolean", "Case-insensitive match."),
                 required = listOf("pattern")
             )
-        ),
-        ToolSpec(
-            "edit_file",
+        ) { ctx, args ->
+            grep(
+                ctx,
+                args.optString("pattern"),
+                args.optString("path", "."),
+                args.optString("glob"),
+                args.optBoolean("ignore_case", false)
+            )
+        },
+        tool("edit_file", plan = false,
             "Replace an exact piece of text in an existing file. old_string must match the file exactly, including whitespace, and must appear once unless replace_all is true. Include a few lines of surrounding context so the match is unique.",
             schema(
                 "path" to prop("string", "Path relative to the repo root."),
@@ -75,85 +62,65 @@ object AgentTools {
                 "replace_all" to prop("boolean", "Replace every occurrence."),
                 required = listOf("path", "old_string", "new_string")
             )
-        ),
-        ToolSpec(
-            "write_file",
-            "Create a file, or replace a whole file. Prefer edit_file for changes to an existing file.",
-            schema(
-                "path" to prop("string", "Path relative to the repo root."),
-                "content" to prop("string", "Complete file contents."),
-                required = listOf("path", "content")
-            )
-        ),
-        ToolSpec(
-            "delete_file",
-            "Delete one file in the repo.",
-            schema(
-                "path" to prop("string", "Path relative to the repo root."),
-                required = listOf("path")
-            )
-        ),
-        ToolSpec(
-            "git_status",
-            "Show the branch and the changed files in the working tree.",
-            schema()
-        ),
-        ToolSpec(
-            "git_diff",
-            "Show the unstaged diff for one file, or for the whole repo.",
-            schema("path" to prop("string", "Optional path relative to the repo root."))
-        ),
-        ToolSpec(
-            "run_js_tests",
-            "Syntax-check every JavaScript file and run *.test.js, *.spec.js, and files under test/ on the phone. Only JavaScript runs on the phone.",
-            schema()
-        ),
-        ToolSpec(
-            "cloud_build",
-            "Compile a Gradle project on Cloud Run with assembleDebug and return the end of the build log. Takes several minutes. Only works when the repo has gradlew.",
-            schema()
-        ),
-        ToolSpec(
-            "create_project",
-            "Create a new empty project folder with its own git repo, add it to the workspace, and switch to it. Every later tool call works in the new project. Only call this when the user explicitly asks for a new project, app, or repo. Never use it to start over on the current repo.",
-            schema(
-                "name" to prop("string", "Folder name. Letters, digits, dot, dash, and underscore."),
-                required = listOf("name")
-            )
-        )
-    )
-
-    private val planNames = setOf("list_dir", "read_file", "grep", "git_status", "git_diff")
-
-    val planSpecs: List<ToolSpec> = specs.filter { it.name in planNames }
-
-    fun run(name: String, args: JSONObject, ctx: AgentContext): String {
-        return when (name) {
-            "list_dir" -> listDir(ctx, args.optString("path", "."), args.optInt("depth", 1))
-            "read_file" -> readFile(ctx, args.optString("path"), args.optInt("start_line", 1), args.optInt("end_line", 0))
-            "grep" -> grep(
-                ctx,
-                args.optString("pattern"),
-                args.optString("path", "."),
-                args.optString("glob"),
-                args.optBoolean("ignore_case", false)
-            )
-            "edit_file" -> editFile(
+        ) { ctx, args ->
+            editFile(
                 ctx,
                 args.optString("path"),
                 args.optString("old_string"),
                 args.optString("new_string"),
                 args.optBoolean("replace_all", false)
             )
-            "write_file" -> writeFile(ctx, args.optString("path"), args.optString("content"))
-            "delete_file" -> deleteFile(ctx, args.optString("path"))
-            "git_status" -> GitOps.status(ctx.repo, ctx.repos)
-            "git_diff" -> GitOps.diff(ctx.repo, ctx.repos, args.optString("path").ifBlank { null }, false)
-            "run_js_tests" -> JsRunner.compile(ctx.repo) + "\n\n" + JsRunner.test(ctx.repo)
-            "cloud_build" -> cloudBuild(ctx)
-            "create_project" -> createProject(ctx, args.optString("name"))
-            else -> error("unknown tool $name")
-        }
+        },
+        tool("write_file", plan = false,
+            "Create a file, or replace a whole file. Prefer edit_file for changes to an existing file.",
+            schema(
+                "path" to prop("string", "Path relative to the repo root."),
+                "content" to prop("string", "Complete file contents."),
+                required = listOf("path", "content")
+            )
+        ) { ctx, args -> writeFile(ctx, args.optString("path"), args.optString("content")) },
+        tool("delete_file", plan = false,
+            "Delete one file in the repo.",
+            schema(
+                "path" to prop("string", "Path relative to the repo root."),
+                required = listOf("path")
+            )
+        ) { ctx, args -> deleteFile(ctx, args.optString("path")) },
+        tool("git_status", plan = true,
+            "Show the branch and the changed files in the working tree.",
+            schema()
+        ) { ctx, _ -> GitOps.status(ctx.repo, ctx.repos) },
+        tool("git_diff", plan = true,
+            "Show the unstaged diff for one file, or for the whole repo.",
+            schema("path" to prop("string", "Optional path relative to the repo root."))
+        ) { ctx, args ->
+            GitOps.diff(ctx.repo, ctx.repos, args.optString("path").ifBlank { null }, false)
+        },
+        tool("run_js_tests", plan = false,
+            "Syntax-check every JavaScript file and run *.test.js, *.spec.js, and files under test/ on the phone. Only JavaScript runs on the phone.",
+            schema()
+        ) { ctx, _ -> JsRunner.compile(ctx.repo) + "\n\n" + JsRunner.test(ctx.repo) },
+        tool("cloud_build", plan = false,
+            "Compile a Gradle project on Cloud Run with assembleDebug and return the end of the build log. Takes several minutes. Only works when the repo has gradlew.",
+            schema()
+        ) { ctx, _ -> cloudBuild(ctx.repo) },
+        tool("create_project", plan = false,
+            "Create a new empty project folder with its own git repo, add it to the workspace, and switch to it. Every later tool call works in the new project. Only call this when the user explicitly asks for a new project, app, or repo. Never use it to start over on the current repo.",
+            schema(
+                "name" to prop("string", "Folder name. Letters, digits, dot, dash, and underscore."),
+                required = listOf("name")
+            )
+        ) { ctx, args -> createProject(ctx, args.optString("name")) },
+    )
+
+    private val byName = tools.associateBy { it.spec.name }
+
+    val specs: List<ToolSpec> = tools.map { it.spec }
+    val planSpecs: List<ToolSpec> = tools.filter { it.plan }.map { it.spec }
+
+    fun run(name: String, args: JSONObject, ctx: AgentContext): String {
+        val tool = byName[name] ?: error("unknown tool $name")
+        return tool.execute(ctx, args)
     }
 
     fun label(name: String, args: JSONObject): String {
@@ -163,7 +130,11 @@ object AgentTools {
             "read_file" -> {
                 val start = args.optInt("start_line", 0)
                 val end = args.optInt("end_line", 0)
-                if (start > 0 || end > 0) "read $path:${start.coerceAtLeast(1)}-${if (end > 0) end else "end"}" else "read $path"
+                if (start > 0 || end > 0) {
+                    "read $path:${start.coerceAtLeast(1)}-${if (end > 0) end else "end"}"
+                } else {
+                    "read $path"
+                }
             }
             "grep" -> "grep \"${args.optString("pattern").take(60)}\"" +
                 args.optString("glob").let { if (it.isBlank()) "" else " in $it" }
@@ -177,6 +148,19 @@ object AgentTools {
             "create_project" -> "create project ${args.optString("name")}"
             else -> name
         }
+    }
+
+    private fun createProject(ctx: AgentContext, raw: String): String {
+        val name = runCatching { GitClient.safeRepoName(raw) }.getOrElse { error("bad project name: $raw") }
+        val dir = File(ctx.repos, name).canonicalFile
+        RepoFiles.ensureInside(ctx.repos, dir)
+        if (dir.exists() && !dir.list().isNullOrEmpty()) error("~/$name already exists. Pick another name.")
+        if (!dir.mkdirs() && !dir.isDirectory) error("could not create ~/$name")
+        val git = GitOps.init(dir)
+        includeProject(name)
+        ctx.root = dir
+        ctx.onRootChanged(dir)
+        return "created ~/$name ($git). It is now the repo for every later tool call; paths are relative to it."
     }
 
     private fun listDir(ctx: AgentContext, raw: String, depthRaw: Int): String {
@@ -256,7 +240,11 @@ object AgentTools {
         }
         if (start.isFile) scan(start) else RepoFiles.walk(start) { scan(it) }
         if (hits.isEmpty()) return "no matches in $files files"
-        val more = if (hits.size >= MAX_GREP_HITS) "\n… stopped at $MAX_GREP_HITS matches. Narrow the pattern or path." else ""
+        val more = if (hits.size >= MAX_GREP_HITS) {
+            "\n… stopped at $MAX_GREP_HITS matches. Narrow the pattern or path."
+        } else {
+            ""
+        }
         return hits.joinToString("\n") + more
     }
 
@@ -304,121 +292,80 @@ object AgentTools {
         return "deleted $raw"
     }
 
-    private fun cloudBuild(ctx: AgentContext): String {
-        if (!File(ctx.repo, "gradlew").isFile) error("this repo has no gradlew, so Cloud Run cannot build it")
-        if (ctx.buildUrl.isBlank() || ctx.buildToken.isBlank()) {
-            error("the Cloud Run URL or token is not set. The user sets them on Console → Variables.")
+    companion object {
+        private const val MAX_READ_LINES = 600
+        private const val MAX_GREP_HITS = 200
+        private const val MAX_LIST = 400
+        private const val MAX_WRITE = 500_000
+
+        /** Pure helpers exposed for JVM tests. */
+        fun target(root: File, raw: String): File {
+            val rel = raw.trim().replace('\\', '/').removePrefix("./").trim('/')
+            if (rel.isEmpty() || rel == ".") return root.canonicalFile
+            val parts = rel.split('/').filter { it.isNotEmpty() && it != "." }
+            if (parts.any { it == ".." }) error("paths cannot use ..")
+            val file = File(root, parts.joinToString(File.separator)).canonicalFile
+            RepoFiles.ensureInside(root, file)
+            return file
         }
-        if (!AppState.tasks.tryClaim(Res.BUILD)) error("a build is already running")
-        AppState.clearBuild()
-        val log = StringBuilder()
-        val note: (String) -> Unit = { line ->
-            AppState.buildLog(line)
-            synchronized(log) {
-                log.append(line).append('\n')
-                if (log.length > 200_000) log.delete(0, log.length - 120_000)
-            }
+
+        fun writable(root: File, raw: String): File {
+            val file = target(root, raw)
+            if (file == root.canonicalFile) error("bad path: $raw")
+            val rel = RepoFiles.rel(file, root)
+            if (rel.split('/').any { it == ".git" }) error("the agent cannot change .git")
+            return file
         }
-        val started = System.currentTimeMillis()
-        var built: File? = null
-        var summary = ""
-        try {
-            note("Agent build. Sending ${ctx.repo.name} to Cloud Run.")
-            val apk = CloudBuild.build(ctx.app, ctx.repo, ctx.buildUrl, ctx.buildToken, note)
-            AppState.lastApk = apk.absolutePath
-            built = apk
-            summary = "Agent build: ${apk.name}"
-            note("APK")
-            note(apk.absolutePath)
-            return "BUILD SUCCESSFUL\nAPK: ${apk.name}\n\n" + tail(log.toString(), 3_000)
-        } catch (t: Throwable) {
-            val message = t.message ?: t.javaClass.simpleName
-            summary = "Agent build failed: $message"
-            note("build failed: $message")
-            return "BUILD FAILED: $message\n\n" + tail(log.toString(), 14_000)
-        } finally {
-            BuildHistory.record(ctx.repo.name, started, built != null, built?.name, summary, AppState.buildText())
-            AppState.tasks.release(Res.BUILD)
-            UiBridge.buildUpdate()
-        }
-    }
 
-    private fun createProject(ctx: AgentContext, raw: String): String {
-        val name = runCatching { GitClient.safeRepoName(raw) }.getOrElse { error("bad project name: $raw") }
-        val dir = File(ctx.repos, name).canonicalFile
-        RepoFiles.ensureInside(ctx.repos, dir)
-        if (dir.exists() && !dir.list().isNullOrEmpty()) error("~/$name already exists. Pick another name.")
-        if (!dir.mkdirs() && !dir.isDirectory) error("could not create ~/$name")
-        val git = GitOps.init(dir)
-        WorkspaceStore.include(name)
-        ctx.root = dir
-        AppState.vibeRepo = dir
-        UiBridge.vibeUpdate()
-        return "created ~/$name ($git). It is now the repo for every later tool call; paths are relative to it."
-    }
-
-    private fun target(root: File, raw: String): File {
-        val rel = raw.trim().replace('\\', '/').removePrefix("./").trim('/')
-        if (rel.isEmpty() || rel == ".") return root.canonicalFile
-        val parts = rel.split('/').filter { it.isNotEmpty() && it != "." }
-        if (parts.any { it == ".." }) error("paths cannot use ..")
-        val file = File(root, parts.joinToString(File.separator)).canonicalFile
-        RepoFiles.ensureInside(root, file)
-        return file
-    }
-
-    private fun writable(root: File, raw: String): File {
-        val file = target(root, raw)
-        if (file == root.canonicalFile) error("bad path: $raw")
-        val rel = RepoFiles.rel(file, root)
-        if (rel.split('/').any { it == ".git" }) error("the agent cannot change .git")
-        return file
-    }
-
-    private fun globRegex(glob: String): Regex {
-        val out = StringBuilder("^")
-        var i = 0
-        while (i < glob.length) {
-            val c = glob[i]
-            when {
-                c == '*' && glob.getOrNull(i + 1) == '*' -> {
-                    out.append(".*")
-                    i++
-                    if (glob.getOrNull(i + 1) == '/') i++
+        fun globRegex(glob: String): Regex {
+            val out = StringBuilder("^")
+            var i = 0
+            while (i < glob.length) {
+                val c = glob[i]
+                when {
+                    c == '*' && glob.getOrNull(i + 1) == '*' -> {
+                        out.append(".*")
+                        i++
+                        if (glob.getOrNull(i + 1) == '/') i++
+                    }
+                    c == '*' -> out.append("[^/]*")
+                    c == '?' -> out.append("[^/]")
+                    c == '{' -> out.append("(?:")
+                    c == '}' -> out.append(")")
+                    c == ',' -> out.append("|")
+                    c in ".()+|^$[]\\" -> out.append('\\').append(c)
+                    else -> out.append(c)
                 }
-                c == '*' -> out.append("[^/]*")
-                c == '?' -> out.append("[^/]")
-                c == '{' -> out.append("(?:")
-                c == '}' -> out.append(")")
-                c == ',' -> out.append("|")
-                c in ".()+|^$[]\\" -> out.append('\\').append(c)
-                else -> out.append(c)
+                i++
             }
-            i++
+            out.append("$")
+            return Regex(out.toString())
         }
-        out.append("$")
-        return Regex(out.toString())
-    }
 
-    private fun tail(text: String, max: Int): String {
-        return if (text.length <= max) text else "…\n" + text.takeLast(max)
-    }
+        private fun size(bytes: Long): String = when {
+            bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
+            bytes >= 1024 -> "${bytes / 1024} KB"
+            else -> "$bytes B"
+        }
 
-    private fun size(bytes: Long): String = when {
-        bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
-        bytes >= 1024 -> "${bytes / 1024} KB"
-        else -> "$bytes B"
-    }
+        private fun prop(type: String, description: String): JSONObject {
+            return JSONObject().put("type", type).put("description", description)
+        }
 
-    private fun prop(type: String, description: String): JSONObject {
-        return JSONObject().put("type", type).put("description", description)
-    }
+        private fun schema(vararg props: Pair<String, JSONObject>, required: List<String> = emptyList()): JSONObject {
+            val properties = JSONObject()
+            props.forEach { (name, value) -> properties.put(name, value) }
+            val out = JSONObject().put("type", "object").put("properties", properties)
+            if (required.isNotEmpty()) out.put("required", JSONArray(required))
+            return out
+        }
 
-    private fun schema(vararg props: Pair<String, JSONObject>, required: List<String> = emptyList()): JSONObject {
-        val properties = JSONObject()
-        props.forEach { (name, value) -> properties.put(name, value) }
-        val out = JSONObject().put("type", "object").put("properties", properties)
-        if (required.isNotEmpty()) out.put("required", JSONArray(required))
-        return out
+        private fun tool(
+            name: String,
+            plan: Boolean,
+            description: String,
+            schema: JSONObject,
+            body: Tool,
+        ): RegisteredTool = RegisteredTool(ToolSpec(name, description, schema), plan, body)
     }
 }

@@ -1,5 +1,6 @@
 package com.example.andvibe
 
+import com.example.andvibe.agent.AgentStart
 import com.example.andvibe.core.GitClient
 import com.example.andvibe.tasks.Res
 import com.example.andvibe.tasks.Resource
@@ -335,7 +336,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 BusyUi.setEnabled(send, true)
                 send.text = "Send"
             }
-            AppState.agentStop.get() -> {
+            graph.agentRuntime.isStopping() -> {
                 BusyUi.setEnabled(send, false)
                 send.text = "Stop"
             }
@@ -2334,72 +2335,19 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         val url = store.buildUrl()
         val token = store.buildToken()
         AppState.clearBuild()
-        val appContext = applicationContext
-        val started = System.currentTimeMillis()
         launchTask("Building APK", AppState.Tab.BUILD, setOf(Res.BUILD)) {
-            var cloud = false
-            var title = "Build failed"
-            var summary = ""
-            var built: File? = null
-            var repo = ""
-            try {
-                val root = AppState.projectRoot()
-                repo = root.name
-                cloud = File(root, "gradlew").isFile
-                DebugLog.step("build", "start path=${root.absolutePath} gradlew=$cloud")
-                AppState.buildLog(RepoFiles.display(root, AppState.reposDir))
-                if (cloud) {
-                    if (url.isBlank() || token.isBlank()) {
-                        DebugLog.step("build", "missing url or token")
-                        title = "Build needs setup"
-                        summary = "Set the build URL and token on Console → Variables."
-                        AppState.buildLog(summary)
-                    } else {
-                        DebugLog.step("build", "mode=cloud")
-                        val note: (String) -> Unit = { line ->
-                            AppState.buildLog(line)
-                            AppState.log(line)
-                        }
-                        note("Gradle project. Sending it to Cloud Run.")
-                        val apk = CloudBuild.build(appContext, root, url, token, note)
-                        AppState.lastApk = apk.absolutePath
-                        note("")
-                        note("APK")
-                        note(apk.absolutePath)
-                        note("Tap Install.")
-                        built = apk
-                        title = "Build ready"
-                        summary = "${root.name}: ${apk.name}"
-                    }
-                } else {
-                    DebugLog.step("build", "mode=local")
-                    AppState.buildLog(JsRunner.detect(root))
-                    AppState.buildLog("")
-                    AppState.buildLog(JsRunner.compile(root))
-                    AppState.buildLog("")
-                    AppState.buildLog(JsRunner.test(root))
-                    AppState.buildLog("")
-                    val apk = ApkPackager.packageApk(appContext, root, AppState::buildLog)
-                    AppState.lastApk = apk.absolutePath
-                    AppState.buildLog("")
-                    AppState.buildLog("APK")
-                    AppState.buildLog(apk.absolutePath)
-                    AppState.buildLog("Tap Install. The new app is named Built app.")
-                    built = apk
-                    title = "Build ready"
-                    summary = "${root.name}: ${apk.name}"
-                }
-            } catch (t: Throwable) {
-                DebugLog.step("build", "fail ${t.javaClass.simpleName}: ${t.message}")
-                val message = "build failed: ${t.message ?: t.javaClass.simpleName}"
-                AppState.buildLog(message)
-                if (cloud) AppState.log(message)
-                summary = t.message ?: t.javaClass.simpleName
-            } finally {
-                BuildHistory.record(repo, started, built != null, built?.name, summary, AppState.buildText())
-                UiBridge.buildUpdate()
-            }
-            TaskRunner.Done(title, summary, built)
+            val root = AppState.projectRoot()
+            AppState.buildLog(RepoFiles.display(root, AppState.reposDir))
+            val outcome = graph.buildService.run(
+                root = root,
+                buildUrl = url,
+                buildToken = token,
+                mode = BuildService.Mode.AUTO,
+                nestClaim = false,
+                mirrorConsole = File(root, "gradlew").isFile,
+                log = AppState::buildLog,
+            )
+            TaskRunner.Done(outcome.title, outcome.summary, outcome.apk)
         }
     }
 
@@ -2762,7 +2710,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
 
     private fun sendVibe() {
         if (AppState.vibeBusy) {
-            AppState.agentStop.set(true)
+            graph.agentRuntime.current()?.cancel()
             UiBridge.vibeUpdate()
             return
         }
@@ -2789,7 +2737,6 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.vibeRepo = root
         AppState.vibeResult = ""
         AppState.writtenPaths = emptyList()
-        AppState.agentStop.set(false)
         synchronized(AppState.agentSteps) { AppState.agentSteps.clear() }
         showTab(AppState.Tab.VIBE)
         binding.vibePage.vibeTabs.getTabAt(0)?.select()
@@ -2808,78 +2755,29 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         start: File?
     ) {
         val appContext = applicationContext
-        val buildUrl = store.buildUrl()
-        val buildToken = store.buildToken()
-        val earlier = AppState.history.toList()
-        launchTask("Agent working", AppState.Tab.VIBE, setOf(Res.AGENT), lane = graph.dispatchers.agent) {
-            DebugLog.step("agent", "start provider=${provider.id} model=$model chars=${instruction.length}")
-            var started: AgentContext? = null
-            var title = "Agent error"
-            try {
-                val ctx = AgentContext(start, AppState.reposDir, appContext, buildUrl, buildToken)
-                started = ctx
-                val job = AgentJob(
-                    ctx, cwd, open, instruction, provider, key, model, base, earlier, AppState.agentStop
-                )
-                val result = Agent.run(job) { line ->
-                    synchronized(AppState.agentSteps) {
-                        AppState.agentSteps.add(line)
-                        if (AppState.agentSteps.size > 300) AppState.agentSteps.removeAt(0)
-                    }
-                    DebugLog.step("agent", line)
-                    UiBridge.vibeUpdate()
-                }
-                val root = ctx.root
-                if (root != null && root.canonicalFile != start?.canonicalFile) {
-                    AppState.cwd = root
-                    ProjectStore.remember(appContext, root)
-                    UiBridge.projectChanged()
-                }
-                val report = buildString {
-                    append(result.text)
-                    if (root != null && result.changed.isNotEmpty()) {
-                        append("\n\nChanged in ").append(root.name).append(':')
-                        result.changed.forEach { file ->
-                            append("\n").append(RepoFiles.rel(file, root))
-                            if (!file.exists()) append(" (deleted)")
-                        }
-                    }
-                }
-                AppState.history.addLast("user" to instruction.take(2000))
-                AppState.history.addLast("assistant" to report.take(2000))
-                while (AppState.history.size > 8) AppState.history.removeFirst()
-                if (result.changed.isNotEmpty() && !AppState.gitBusy) {
-                    AppState.gitSnapshot = runCatching {
-                        GitOps.snapshot(AppState.cwd, AppState.reposDir)
-                    }.getOrNull()
-                    UiBridge.gitUpdate()
-                }
-                AppState.writtenPaths = result.changed.filter { it.isFile }.map { it.canonicalPath }
-                AppState.vibeResult = report
-                DebugLog.step("agent", "done steps=${result.steps} files=${result.changed.size}")
-                AppState.log(report)
-                title = if (AppState.agentStop.get()) "Agent stopped" else "Agent finished"
-            } catch (t: Throwable) {
-                val ctx = started
-                val changed = ctx?.changed?.toList().orEmpty()
-                val msg = buildString {
-                    append(t.message ?: t.javaClass.simpleName)
-                    val root = ctx?.root
-                    if (root != null && changed.isNotEmpty()) {
-                        append("\n\nChanged in ").append(root.name).append(" before the error:")
-                        changed.forEach { append("\n").append(RepoFiles.rel(it, root)) }
-                    }
-                }
-                AppState.vibeResult = msg
-                AppState.writtenPaths = changed.filter { it.isFile }.map { it.canonicalPath }
-                if (changed.isNotEmpty()) UiBridge.gitUpdate()
-                DebugLog.step("agent", "fail ${t.javaClass.simpleName}: $msg")
-                AppState.log("agent error: $msg")
-            } finally {
-                AppState.agentStop.set(false)
-                UiBridge.vibeUpdate()
-            }
-            TaskRunner.Done(title, AppState.vibeResult)
+        val adapter = AgentVibeAdapter(start, instruction) { root ->
+            ProjectStore.remember(appContext, root)
+        }
+        val started = graph.agentRuntime.start(
+            AgentStart(
+                root = start,
+                repos = AppState.reposDir,
+                cwd = cwd,
+                open = open,
+                task = instruction,
+                provider = provider,
+                key = key,
+                model = model,
+                base = base,
+                earlier = AppState.history.toList(),
+                workspaceRepos = WorkspaceStore.activeRepos(),
+                onRootChanged = adapter::onRootChanged,
+            ),
+            onEvent = adapter::onEvent,
+        )
+        if (started == null) {
+            AppState.vibeResult = "an agent is already running"
+            UiBridge.vibeUpdate()
         }
     }
 
