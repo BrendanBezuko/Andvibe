@@ -21,28 +21,13 @@ class AgentJob(
 )
 
 object Agent {
+    private const val MAX_PLAN_STEPS = 12
     private const val MAX_STEPS = 40
     private const val MAX_RESULT = 20_000
     private const val COMPACT_AT = 300_000
 
-    private val systemPrompt = """
-        You are a coding agent working inside AndVibe, an Android app. The user's repo is stored on this phone, and you change it only through the tools you are given. There is no shell.
-
-        Which code to change:
-        - Work on the existing code in the selected repo. Fix, extend, or refactor what is already there. Do not rewrite the project from scratch, scaffold a separate app, or put new work in a new folder.
-        - Only call create_project when the user explicitly asks for a new project, app, or repo. If the request could go either way, change the existing repo.
-        - If no repo is selected and the user did not ask for a new project, do not create one. Reply asking them to pick a project in the bottom bar.
-        - The user may @mention other workspace repos for reference. Use that read-only context when they do. Do not edit those repos; tools only change the selected project.
-
-        How to work:
-        - Explore before you edit. Use grep and list_dir to find the code, and read_file to read it. Do not guess at file contents.
-        - Change files with edit_file. Copy old_string exactly from read_file output, without the line-number prefix, and include enough surrounding lines to make it unique. Use write_file for new files.
-        - Keep changes small and in the style of the surrounding code. Do not reformat code you are not changing.
-        - JavaScript can run on the phone: call run_js_tests after changing JavaScript.
-        - Kotlin, Java, and Gradle cannot run on the phone. When the repo has gradlew, cloud_build compiles it on Cloud Run in a few minutes. Use it to check a Gradle change you are unsure of, or when the task is to fix the build, and fix what the log reports.
-        - Do not commit. The user reviews your changes on the Git tab.
-        - When you are done, reply without calling a tool. Say what you changed and anything the user should check, in a few sentences.
-    """.trimIndent()
+    private val planPrompt get() = PromptStore.get(PromptStore.Kind.PLAN)
+    private val systemPrompt get() = PromptStore.get(PromptStore.Kind.AGENT)
 
     fun run(job: AgentJob, onStep: (String) -> Unit): AgentResult {
         if (job.task.length > 16_000) error("prompt is too long")
@@ -54,28 +39,71 @@ object Agent {
         if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
             error("base URL must start with https://")
         }
-        val model: AgentModel = when (job.provider) {
-            Provider.ANTHROPIC -> AnthropicModel(baseUrl, job.key, job.model)
-            Provider.GEMINI -> GeminiModel(baseUrl, job.key, job.model)
-            Provider.CURSOR -> error("Cursor cannot run the phone agent")
-            Provider.OPENAI -> ResponsesModel(baseUrl, job.key, job.model)
-            else -> if (baseUrl.contains("api.openai.com")) {
-                ResponsesModel(baseUrl, job.key, job.model)
-            } else {
-                OpenAiModel(baseUrl, job.key, job.model, job.provider)
-            }
+        val context = firstMessage(job)
+        onStep("Planning…")
+        val planned = phase(
+            job = job,
+            model = makeModel(job, baseUrl),
+            system = planPrompt,
+            tools = AgentTools.planSpecs,
+            user = context,
+            maxSteps = MAX_PLAN_STEPS,
+            onStep = onStep,
+            label = "plan"
+        )
+        if (job.stop.get()) {
+            return finish(job, "Stopped during planning. ${planned.text}".trim(), planned.steps)
         }
-        model.start(systemPrompt, AgentTools.specs, firstMessage(job))
+        val plan = planned.text.trim().ifBlank { "No detailed plan. Explore briefly, then make the smallest change that finishes the task." }
+        onStep("Plan ready")
+        onStep(plan.take(600))
+        val executeUser = buildString {
+            append(context)
+            append("\n\nAgreed plan:\n")
+            append(plan)
+            append("\n\nFollow that plan. Explore only what you still need, then edit.")
+        }
+        onStep("Executing…")
+        val done = phase(
+            job = job,
+            model = makeModel(job, baseUrl),
+            system = systemPrompt,
+            tools = AgentTools.specs,
+            user = executeUser,
+            maxSteps = MAX_STEPS,
+            onStep = onStep,
+            label = "agent"
+        )
+        val total = planned.steps + done.steps
+        if (job.stop.get()) {
+            return finish(job, "Stopped. ${done.text}".trim(), total)
+        }
+        return finish(job, done.text.trim().ifBlank { "Done." }, total)
+    }
+
+    private data class PhaseResult(val text: String, val steps: Int)
+
+    private fun phase(
+        job: AgentJob,
+        model: AgentModel,
+        system: String,
+        tools: List<ToolSpec>,
+        user: String,
+        maxSteps: Int,
+        onStep: (String) -> Unit,
+        label: String
+    ): PhaseResult {
+        model.start(system, tools, user)
         var lastText = ""
-        for (step in 1..MAX_STEPS) {
-            if (job.stop.get()) return finish(job, "Stopped. $lastText".trim(), step - 1)
+        for (step in 1..maxSteps) {
+            if (job.stop.get()) return PhaseResult(lastText, step - 1)
             val turn = model.step()
             val input = if (turn.input > 0) turn.input else AiClient.guessTokens(model.size())
             val output = if (turn.output > 0) turn.output else AiClient.guessTokens(turn.text.length + 200)
             WorkspaceStore.addUse(job.model, input, output)
             UiBridge.usageUpdate()
             if (turn.calls.isEmpty()) {
-                return finish(job, turn.text.trim().ifBlank { "Done." }, step)
+                return PhaseResult(turn.text.trim().ifBlank { lastText }, step)
             }
             if (turn.text.isNotBlank()) {
                 lastText = turn.text.trim()
@@ -98,7 +126,7 @@ object Agent {
                         ToolResult(call, "error: ${t.message ?: t.javaClass.simpleName}", true)
                     }
                 }
-                DebugLog.step("agent", "${call.name} error=${result.error} chars=${result.output.length}")
+                DebugLog.step(label, "${call.name} error=${result.error} chars=${result.output.length}")
                 summary(call.name, result)?.let { onStep("   $it") }
                 if (call.name in WRITES && !result.error) UiBridge.filesChanged()
                 results.add(result)
@@ -106,7 +134,23 @@ object Agent {
             model.addResults(results)
             if (model.size() > COMPACT_AT) model.compact(keep = 6)
         }
-        return finish(job, "Stopped after $MAX_STEPS steps. $lastText".trim(), MAX_STEPS)
+        return PhaseResult(
+            lastText.ifBlank { "Stopped after $maxSteps $label steps." },
+            maxSteps
+        )
+    }
+
+    private fun makeModel(job: AgentJob, baseUrl: String): AgentModel {
+        return when (job.provider) {
+            Provider.ANTHROPIC -> AnthropicModel(baseUrl, job.key, job.model)
+            Provider.GEMINI -> GeminiModel(baseUrl, job.key, job.model)
+            Provider.OPENAI -> ResponsesModel(baseUrl, job.key, job.model)
+            else -> if (baseUrl.contains("api.openai.com")) {
+                ResponsesModel(baseUrl, job.key, job.model)
+            } else {
+                OpenAiModel(baseUrl, job.key, job.model, job.provider)
+            }
+        }
     }
 
     private val WRITES = setOf("edit_file", "write_file", "delete_file")

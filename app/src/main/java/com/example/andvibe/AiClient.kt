@@ -12,16 +12,7 @@ import java.util.ArrayDeque
 data class EditResult(val report: String, val written: List<File>)
 
 object AiClient {
-    private val systemPrompt = """
-        You edit a repo on an Android phone. The phone can preview index.html and run plain JavaScript. Relative require("./file.js") works. npm packages, import/export, Python, Java, Kotlin, Gradle, Rust, and Go do not run on the phone. Tests use assert(cond, msg), assert.equal(a, b), and assert.strictEqual(a, b). Name tests *.test.js or put them in test/.
-
-        Reply with one JSON object and nothing else:
-        {"summary":"what changed","files":[{"path":"relative/path.js","content":"the full new file"}]}
-
-        Change the existing code in this repo. Do not rewrite the project from scratch or scaffold a separate app unless the user explicitly asks for a new project.
-
-        Paths are relative to the repo root. Use forward slashes. Never use .. or absolute paths. Include the complete contents of every file you change or create. Omit files you do not change. If no files change, return an empty files array and put the answer in summary. Do not wrap the JSON in markdown.
-    """.trimIndent()
+    private val systemPrompt get() = PromptStore.get(PromptStore.Kind.EDIT)
 
     private val sourceExt = setOf(
         "js", "mjs", "cjs", "html", "htm", "css", "json", "md", "txt",
@@ -54,7 +45,6 @@ object AiClient {
         val reply = when (provider) {
             Provider.ANTHROPIC -> anthropic(baseUrl, key, model, messages)
             Provider.GEMINI -> gemini(baseUrl, key, model, messages)
-            Provider.CURSOR -> cursor(baseUrl, key, model, messages)
             else -> openaiCompatible(baseUrl, key, model, messages, headers = extraHeaders(provider))
         }
         val charged = if (reply.input == 0L && reply.output == 0L) {
@@ -103,7 +93,6 @@ object AiClient {
         val reply = when (provider) {
             Provider.ANTHROPIC -> anthropic(baseUrl, key, model, messages, system)
             Provider.GEMINI -> gemini(baseUrl, key, model, messages, system)
-            Provider.CURSOR -> cursor(baseUrl, key, model, messages, system)
             else -> openaiCompatible(baseUrl, key, model, messages, system, extraHeaders(provider))
         }
         val charged = if (reply.input == 0L && reply.output == 0L) {
@@ -126,7 +115,6 @@ object AiClient {
         if (user.length > 16_000) error("prompt is too long")
         if (key.isBlank()) error("add an API key in Settings")
         if (model.isBlank()) error("set a model name")
-        if (provider == Provider.CURSOR) error("Cursor cannot search the web")
         val baseUrl = base.ifBlank { provider.defaultBase }
         if (baseUrl.isBlank()) error("set a base URL")
         val messages = listOf("user" to user)
@@ -615,110 +603,8 @@ object AiClient {
         return "$trimmed/models/$model:generateContent"
     }
 
-    private fun cursor(
-        base: String,
-        key: String,
-        model: String,
-        messages: List<Pair<String, String>>,
-        system: String = systemPrompt
-    ): Reply {
-        val body = JSONObject()
-        body.put("name", "AndVibe")
-        body.put("mode", "plan")
-        body.put("model", JSONObject().put("id", model))
-        body.put("prompt", JSONObject().put("text", cursorPrompt(system, messages)))
-        val created = JSONObject(post(cursorUrl(base, "/v1/agents"), cursorHeaders(key), body.toString()))
-        val agent = created.optJSONObject("agent") ?: error("Cursor did not return an agent")
-        val run = created.optJSONObject("run") ?: error("Cursor did not return a run")
-        val agentId = agent.optString("id")
-        val runId = run.optString("id")
-        if (agentId.isBlank() || runId.isBlank()) error("Cursor did not return a run id")
-        val page = agent.optString("url").ifBlank { agentId }
-        try {
-            val text = waitForCursor(base, key, agentId, runId, page)
-            val usage = cursorUsage(base, key, agentId, runId)
-            return Reply(text, usage.first, usage.second)
-        } finally {
-            runCatching {
-                post(cursorUrl(base, "/v1/agents/$agentId/archive"), cursorHeaders(key), "{}")
-            }
-        }
-    }
-
-    private fun cursorPrompt(system: String, messages: List<Pair<String, String>>): String {
-        return buildString {
-            append(system)
-            append("\n\n")
-            append(
-                "This request has no repository. Do not use tools, do not run commands, and do not edit files. " +
-                    "The phone applies file changes from your reply. Reply with only the requested text.\n\n"
-            )
-            for ((role, content) in messages) {
-                append(role).append(":\n").append(content).append("\n\n")
-            }
-        }
-    }
-
-    private fun waitForCursor(base: String, key: String, agentId: String, runId: String, page: String): String {
-        val deadline = System.currentTimeMillis() + 360_000L
-        while (System.currentTimeMillis() < deadline) {
-            val json = JSONObject(get(cursorUrl(base, "/v1/agents/$agentId/runs/$runId"), cursorHeaders(key)))
-            when (json.optString("status").uppercase()) {
-                "FINISHED" -> {
-                    val text = json.optString("result")
-                    if (text.isBlank()) error("empty response")
-                    return text
-                }
-                "ERROR", "CANCELLED", "EXPIRED" -> {
-                    val detail = json.optString("result").ifBlank { json.optString("status") }
-                    error("Cursor run ${json.optString("status")}: $detail\n$page")
-                }
-            }
-            try {
-                Thread.sleep(2_000)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                error("Cursor run interrupted\n$page")
-            }
-        }
-        error("Cursor run timed out\n$page")
-    }
-
-    private fun cursorUsage(base: String, key: String, agentId: String, runId: String): Pair<Long, Long> {
-        return try {
-            val json = JSONObject(
-                get(cursorUrl(base, "/v1/agents/$agentId/usage?runId=$runId"), cursorHeaders(key))
-            )
-            val runs = json.optJSONArray("runs")
-            val usage = runs?.optJSONObject(0)?.optJSONObject("usage")
-                ?: json.optJSONObject("totalUsage")
-            val input = usage?.optLong("inputTokens")?.coerceAtLeast(0) ?: 0L
-            val output = usage?.optLong("outputTokens")?.coerceAtLeast(0) ?: 0L
-            input to output
-        } catch (_: Exception) {
-            0L to 0L
-        }
-    }
-
-    private fun cursorHeaders(key: String): Map<String, String> {
-        return mapOf("Authorization" to "Bearer $key")
-    }
-
-    private fun cursorUrl(base: String, path: String): String {
-        val trimmed = base.trim().trimEnd('/')
-        val root = when {
-            trimmed.endsWith("/v1") -> trimmed.removeSuffix("/v1")
-            else -> trimmed
-        }
-        return root + path
-    }
-
     internal fun post(url: String, headers: Map<String, String>, body: String): String {
         return http("POST", url, headers, body, 180_000)
-    }
-
-    private fun get(url: String, headers: Map<String, String>): String {
-        return http("GET", url, headers, null, 30_000)
     }
 
     private fun http(

@@ -69,6 +69,7 @@ object AppState {
         appContext = context.applicationContext
         WorkspaceStore.init(appContext)
         ChatStore.init(appContext)
+        PromptStore.init(appContext)
         reposDir = File(appContext.filesDir, "repos").apply { mkdirs() }
         WorkspaceStore.migrate()
         cwd = ProjectStore.restore(appContext, reposDir)?.takeIf { WorkspaceStore.contains(it) } ?: reposDir

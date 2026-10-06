@@ -25,42 +25,7 @@ object Understand {
         "server.py", "main.py", "main.go", "main.rs", "app.py"
     )
 
-    private val systemPrompt = """
-        You document a codebase that already lives on the user's phone. A local scan of
-        function and method signatures is included. Treat that scan and the file snippets
-        as the source of truth. Do not invent files, classes, or functions that are not there.
-
-        Reply with markdown only, in this exact shape:
-
-        # <repo> — How it works
-
-        ## Overview
-        Two to five short paragraphs. What the project is, the main parts, and how data moves.
-
-        ## Flow
-        One mermaid flowchart (flowchart TD or LR) of the major parts and how they connect.
-        Use real names from the scan. Keep node labels short.
-
-        ```mermaid
-        flowchart TD
-          ...
-        ```
-
-        ## Sequence
-        One mermaid sequenceDiagram for the most important runtime path (startup, request,
-        build, agent loop, or whatever fits this repo). Use real actors.
-
-        ```mermaid
-        sequenceDiagram
-          ...
-        ```
-
-        ## Key points
-        Three to six bullets the reader should remember.
-
-        Do not include a function-definitions section. The phone appends the scanned defs.
-        Do not wrap the whole reply in a markdown code fence.
-    """.trimIndent()
+    private val systemPrompt get() = PromptStore.get(PromptStore.Kind.UNDERSTAND)
 
     fun outFile(root: File): File = File(root, OUT_NAME)
 
@@ -94,7 +59,7 @@ object Understand {
         onStep("Found ${defs.size} defs in ${defs.map { it.path }.toSet().size} files")
         val packed = pack(root, focus, defs)
         if (stop.get()) error("stopped")
-        onStep("Asking ${provider.label} for diagrams")
+        onStep("Asking ${provider.label} for ratings and diagrams")
         val prose = AiClient.complete(systemPrompt, packed, provider, key, model, base, maxUser = 80_000)
         if (stop.get()) error("stopped")
         val markdown = assemble(root.name, prose, defs, focus)
@@ -172,7 +137,7 @@ object Understand {
                     append("----- end -----\n")
                 }
             }
-            append("\nWrite the documentation now.")
+            append("\nWrite the documentation now. Start with Ratings graphs and Issues, then Overview, Flow, Sequence, and Key points.")
         }
     }
 

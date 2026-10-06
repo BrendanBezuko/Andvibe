@@ -9,9 +9,10 @@ import kotlin.math.roundToLong
 
 object WorkspaceStore {
     enum class Column(val id: String, val label: String) {
-        IDEA("idea", "Ideas"),
+        IDEA("idea", "Features"),
         BUG("bug", "Bugs"),
-        SOLUTION("solution", "Solutions");
+        SOLUTION("solution", "Solutions"),
+        COMPLETED("completed", "Completed");
 
         companion object {
             fun from(id: String): Column = entries.firstOrNull { it.id == id } ?: IDEA

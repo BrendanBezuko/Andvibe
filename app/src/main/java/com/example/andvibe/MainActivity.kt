@@ -29,6 +29,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ListPopupWindow
@@ -68,6 +69,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private val gitCollapsed = mutableSetOf<String>()
     private val vault = mutableMapOf<String, EditText>()
     private val apiKeys = linkedMapOf<Provider, EditText>()
+    private val promptFields = linkedMapOf<PromptStore.Kind, EditText>()
     private var settingsOpen = false
     private var workspaceOpen = false
     private var understandShowSource = false
@@ -332,7 +334,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 send.text = "Stopping…"
             }
             else -> {
-                send.isEnabled = currentProvider != Provider.CURSOR
+                send.isEnabled = true
                 send.text = "Stop"
             }
         }
@@ -553,6 +555,8 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.settingsPage.allowBackground.setOnClickListener { requestBackground() }
         binding.settingsPage.saveGit.setOnClickListener { saveGitSettings() }
         binding.settingsPage.saveApiKeys.setOnClickListener { saveApiKeys(announce = true) }
+        binding.settingsPage.savePrompts.setOnClickListener { savePrompts(announce = true) }
+        binding.settingsPage.resetPrompts.setOnClickListener { resetAllPrompts() }
         binding.settingsPage.showApiKeys.setOnCheckedChangeListener { _, checked ->
             val type = if (checked) {
                 InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
@@ -565,6 +569,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             }
         }
         buildApiKeyFields()
+        buildPromptFields()
     }
 
     private fun openSettings() {
@@ -574,6 +579,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         renderBackground()
         loadGitSettings()
         loadApiKeys()
+        loadPrompts()
         binding.settingsPage.root.visibility = View.VISIBLE
         syncBack()
     }
@@ -643,6 +649,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
     private fun closeSettings() {
         if (!settingsOpen) return
         saveApiKeys(announce = false)
+        savePrompts(announce = false)
         settingsOpen = false
         binding.settingsPage.root.visibility = View.GONE
         syncBack()
@@ -691,6 +698,97 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         if (announce) binding.settingsPage.keyNote.text = "Saved."
     }
 
+    private fun buildPromptFields() {
+        val parent = binding.settingsPage.promptList
+        if (parent.childCount > 0) return
+        for (kind in PromptStore.Kind.entries) {
+            val title = TextView(this).apply {
+                text = kind.label
+                setTextColor(getColor(R.color.ink))
+                textSize = 13f
+            }
+            val titleParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            titleParams.topMargin = dp(16)
+            parent.addView(title, titleParams)
+
+            val blurb = TextView(this).apply {
+                text = kind.blurb
+                setTextColor(getColor(R.color.muted))
+                textSize = 12f
+            }
+            val blurbParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            blurbParams.topMargin = dp(4)
+            parent.addView(blurb, blurbParams)
+
+            val field = EditText(this).apply {
+                setHintTextColor(getColor(R.color.muted))
+                setTextColor(getColor(R.color.ink))
+                setBackgroundResource(R.drawable.bg_field)
+                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                gravity = Gravity.TOP or Gravity.START
+                minLines = if (kind == PromptStore.Kind.COMMIT) 2 else 6
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                textSize = 12f
+                typeface = Typeface.MONOSPACE
+                setText(PromptStore.get(kind))
+            }
+            promptFields[kind] = field
+            val fieldParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            fieldParams.topMargin = dp(8)
+            parent.addView(field, fieldParams)
+
+            val reset = Button(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                text = "Reset"
+                textSize = 13f
+                minHeight = dp(40)
+                setOnClickListener {
+                    field.setText(PromptStore.default(kind))
+                    PromptStore.reset(kind)
+                    binding.settingsPage.promptNote.text = "Restored ${kind.label} default."
+                }
+            }
+            val resetParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            resetParams.topMargin = dp(6)
+            parent.addView(reset, resetParams)
+        }
+    }
+
+    private fun loadPrompts() {
+        for ((kind, field) in promptFields) {
+            field.setText(PromptStore.get(kind))
+        }
+        binding.settingsPage.promptNote.text = ""
+    }
+
+    private fun savePrompts(announce: Boolean) {
+        if (promptFields.isEmpty()) return
+        for ((kind, field) in promptFields) {
+            PromptStore.set(kind, field.text?.toString().orEmpty())
+        }
+        if (announce) binding.settingsPage.promptNote.text = "Saved."
+    }
+
+    private fun resetAllPrompts() {
+        PromptStore.resetAll()
+        for ((kind, field) in promptFields) {
+            field.setText(PromptStore.default(kind))
+        }
+        binding.settingsPage.promptNote.text = "Restored all defaults."
+    }
+
     private fun setupUsage() {
         binding.openWorkspaceBox.setOnClickListener {
             if (workspaceOpen) closeWorkspace() else openWorkspace()
@@ -706,6 +804,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         binding.boardPage.addIdea.setOnClickListener { editCard(null, WorkspaceStore.Column.IDEA.id) }
         binding.boardPage.addBug.setOnClickListener { editCard(null, WorkspaceStore.Column.BUG.id) }
         binding.boardPage.addSolution.setOnClickListener { editCard(null, WorkspaceStore.Column.SOLUTION.id) }
+        binding.boardPage.addCompleted.setOnClickListener { editCard(null, WorkspaceStore.Column.COMPLETED.id) }
         onUsage()
     }
 
@@ -864,14 +963,19 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 row.cardBody.visibility = View.VISIBLE
                 row.cardBody.text = card.body
             }
-            row.root.setOnClickListener { showCardMenu(card) }
+            row.root.setOnClickListener { buildCard(card) }
+            row.root.setOnLongClickListener {
+                showCardMenu(card)
+                true
+            }
             parent.addView(row.root)
         }
     }
 
     private fun showCardMenu(card: WorkspaceStore.Card) {
-        val labels = mutableListOf("Edit")
+        val labels = mutableListOf("Build", "Edit")
         val actions = mutableListOf<() -> Unit>()
+        actions.add { buildCard(card) }
         actions.add { editCard(card, card.column) }
         for (column in WorkspaceStore.Column.entries) {
             if (column.id == card.column) continue
@@ -890,6 +994,35 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
             .setTitle(card.title)
             .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
             .show()
+    }
+
+    private fun buildCard(card: WorkspaceStore.Card) {
+        if (AppState.vibeBusy) {
+            android.widget.Toast.makeText(
+                this, "Wait for the agent to finish", android.widget.Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        startVibe(cardInstruction(card))
+    }
+
+    private fun cardInstruction(card: WorkspaceStore.Card): String {
+        val lead = when (card.column) {
+            WorkspaceStore.Column.BUG.id -> "Fix this bug from the Board."
+            WorkspaceStore.Column.SOLUTION.id -> "Implement this solution from the Board."
+            else -> "Implement this feature from the Board."
+        }
+        return buildString {
+            append(lead)
+            append("\n\n")
+            append(card.title.trim())
+            val note = card.body.trim()
+            if (note.isNotEmpty()) {
+                append("\n\n")
+                append(note)
+            }
+            append("\n\nMake a focused change in the open repo. Do not commit.")
+        }
     }
 
     private fun editCard(existing: WorkspaceStore.Card?, column: String) {
@@ -2634,22 +2767,22 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         }
         val instruction = binding.vibePage.vibePrompt.text?.toString()?.trim().orEmpty()
         if (instruction.isEmpty()) return
+        binding.vibePage.vibePrompt.setText("")
+        startVibe(instruction)
+    }
+
+    private fun startVibe(instruction: String) {
+        if (instruction.isBlank() || AppState.vibeBusy) return
         val root = vibeRoot()
-        if (root == null && currentProvider == Provider.CURSOR) {
-            pickVibeRepo()
-            return
-        }
         if (root != null) ensureProject(root)
         saveEditor(announce = false)
         saveProvider(currentProvider)
-        binding.vibePage.vibePrompt.setText("")
         AppState.chat.add("user" to instruction)
         ChatStore.save()
         val provider = currentProvider
         val key = store.get(provider, "key", "")
         val model = binding.vibePage.model.text?.toString()?.trim().orEmpty()
         val base = binding.vibePage.baseUrl.text?.toString()?.trim().orEmpty()
-        val auto = binding.vibePage.autoTest.isChecked
         val open = AppState.openFile
         val cwd = AppState.cwd
         AppState.vibeBusy = true
@@ -2658,55 +2791,11 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
         AppState.writtenPaths = emptyList()
         AppState.agentStop.set(false)
         synchronized(AppState.agentSteps) { AppState.agentSteps.clear() }
+        showTab(AppState.Tab.VIBE)
+        binding.vibePage.vibeTabs.getTabAt(0)?.select()
         UiBridge.vibeUpdate()
         val job = startJob("Agent working", AppState.Tab.VIBE)
-        if (provider != Provider.CURSOR) {
-            runAgent(job, instruction, provider, key, model, base, open, cwd, root)
-            return
-        }
-        AppState.io.execute {
-            DebugLog.step("vibe", "start provider=${provider.id} chars=${instruction.length}")
-            var title = "Agent error"
-            try {
-                if (root == null) error("pick a repo at the top of Vibe")
-                val edit = AiClient.edit(
-                    root, cwd, open, instruction, provider, key, model, base, AppState.history
-                )
-                val report = buildString {
-                    append(edit.report)
-                    if (edit.written.isNotEmpty()) {
-                        append("\n\nRepo: ").append(root.name)
-                        if (!AppState.gitBusy) {
-                            AppState.gitSnapshot = runCatching {
-                                GitOps.snapshot(AppState.cwd, AppState.reposDir)
-                            }.getOrNull()
-                            UiBridge.gitUpdate()
-                        }
-                    }
-                    if (auto && edit.written.isNotEmpty()) {
-                        append("\n\n")
-                        append(JsRunner.compile(root))
-                        append('\n')
-                        append(JsRunner.test(root))
-                    }
-                }
-                AppState.vibeResult = report
-                AppState.writtenPaths = edit.written.map { it.canonicalPath }
-                DebugLog.step("vibe", "done files=${edit.written.size}")
-                AppState.log(report)
-                title = "Agent finished"
-            } catch (t: Throwable) {
-                val msg = t.message ?: t.javaClass.simpleName
-                AppState.vibeResult = msg
-                AppState.writtenPaths = emptyList()
-                DebugLog.step("vibe", "fail ${t.javaClass.simpleName}: $msg")
-                AppState.log("vibe error: $msg")
-            }             finally {
-                AppState.vibeBusy = false
-                UiBridge.vibeUpdate()
-                Jobs.end(job, title, AppState.vibeResult)
-            }
-        }
+        runAgent(job, instruction, provider, key, model, base, open, cwd, root)
     }
 
     private fun runAgent(
@@ -3159,7 +3248,7 @@ class MainActivity : AppCompatActivity(), UiBridge.Listener {
                 val diff = GitOps.diff(cwd, repos, null, false).take(4000)
                 val staged = GitOps.diff(cwd, repos, null, true).take(2000)
                 val raw = AiClient.complete(
-                    "Reply with one git commit subject and nothing else. No quotes.",
+                    PromptStore.get(PromptStore.Kind.COMMIT),
                     "Changes:\n$files\n\nUnstaged diff:\n$diff\n\nStaged diff:\n$staged",
                     provider,
                     key,

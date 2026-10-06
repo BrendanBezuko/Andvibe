@@ -35,18 +35,6 @@ object FossSearch {
 
     private val hosts = setOf("github.com", "gitlab.com", "codeberg.org", "git.sr.ht")
 
-    private const val RANK = """
-        You choose free and open-source repositories for someone about to download one onto a phone. Reply with one JSON object and nothing else:
-        {"picks":[{"url":"https://host/owner/repo","why":"one short sentence"}]}
-        Use only URLs from the candidate list. Return at most 5 picks, best first. Prefer a close match, a permissive license, and a project people actually use. Do not invent repositories.
-    """
-
-    private const val AGENT = """
-        You research open-source software and the technology news around it. You can search the web. Reply with one JSON object and nothing else:
-        {"brief":"what is current, in a few sentences","repos":[{"url":"https://github.com/owner/repo","why":"one sentence"}],"news":[{"title":"headline","url":"https://article","source":"publication","summary":"one sentence","repo":"https://github.com/owner/repo"}]}
-        Prefer repositories on github.com, gitlab.com, codeberg.org, and git.sr.ht, especially ones listed as known forge results when they match. Search the web before you answer. Use only URLs you found. At most 6 repos and 6 news items. Leave repo empty when a story is not about one repository. Do not invent a project or an article.
-    """
-
     fun search(
         query: String,
         provider: Provider,
@@ -58,7 +46,7 @@ object FossSearch {
         val asked = query.trim().replace(Regex("\\s+"), " ").take(160)
         if (asked.isBlank()) error("say what you want to find")
         val known = merge(cached, knownChannels(asked))
-        if (key.isNotBlank() && model.isNotBlank() && provider != Provider.CURSOR) {
+        if (key.isNotBlank() && model.isNotBlank()) {
             try {
                 val report = agent(asked, known, provider, key, model, base)
                 val repos = merge(report.repos, known)
@@ -76,7 +64,7 @@ object FossSearch {
             }
         }
         if (known.isEmpty()) error("no matches on GitHub, GitLab, or Codeberg")
-        val note = if (key.isBlank() || provider == Provider.CURSOR) {
+        val note = if (key.isBlank()) {
             "Add a web-search provider key in Settings. These are from GitHub, GitLab, and Codeberg."
         } else {
             "Tap a repo to clone it."
@@ -103,7 +91,7 @@ object FossSearch {
             }
         }
         val raw = AiClient.research(
-            AGENT.trimIndent(),
+            PromptStore.get(PromptStore.Kind.FOSS_AGENT),
             "Request: $query\n\nKnown forge results:\n$catalog",
             provider,
             key,
@@ -301,7 +289,7 @@ object FossSearch {
             "${hit.page} | ${hit.stars} stars | $license | ${hit.blurb}"
         }
         val raw = AiClient.complete(
-            RANK.trimIndent(),
+            PromptStore.get(PromptStore.Kind.FOSS_RANK),
             "Request: $query\n\nCandidates:\n$catalog",
             provider,
             key,

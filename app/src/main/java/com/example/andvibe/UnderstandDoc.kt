@@ -106,6 +106,13 @@ object UnderstandDoc {
                   theme: 'dark',
                   flowchart: { htmlLabels: false, curve: 'basis' },
                   sequence: { mirrorActors: false, messageAlign: 'left' },
+                  xyChart: {
+                    width: 520,
+                    height: 280,
+                    titleFontSize: 14,
+                    xAxis: { labelFontSize: 11 },
+                    yAxis: { labelFontSize: 11 }
+                  },
                   themeVariables: {
                     darkMode: true,
                     background: '#0D1117',
@@ -136,7 +143,28 @@ object UnderstandDoc {
                     noteTextColor: '#E6EDF3',
                     noteBorderColor: '#30363D',
                     activationBkgColor: '#21262D',
-                    sequenceNumberColor: '#0D1117'
+                    sequenceNumberColor: '#0D1117',
+                    pie1: '#58A6FF',
+                    pie2: '#F85149',
+                    pie3: '#D29922',
+                    pie4: '#3FB950',
+                    pie5: '#8B949E',
+                    pieTitleTextColor: '#E6EDF3',
+                    pieSectionTextColor: '#E6EDF3',
+                    pieLegendTextColor: '#E6EDF3',
+                    xyChart: {
+                      backgroundColor: '#161B22',
+                      titleColor: '#E6EDF3',
+                      xAxisLabelColor: '#8B949E',
+                      xAxisTitleColor: '#E6EDF3',
+                      xAxisTickColor: '#30363D',
+                      xAxisLineColor: '#30363D',
+                      yAxisLabelColor: '#8B949E',
+                      yAxisTitleColor: '#E6EDF3',
+                      yAxisTickColor: '#30363D',
+                      yAxisLineColor: '#30363D',
+                      plotColorPalette: '#58A6FF'
+                    }
                   }
                 });
                 mermaid.run({ querySelector: '.mermaid' }).catch(function (e) {

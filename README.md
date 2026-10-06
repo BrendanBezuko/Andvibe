@@ -79,15 +79,13 @@ Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a fi
 
 Open a project, then open the Understand tab (brain icon). Optionally type a focus, such as the agent loop or the build path. Tap **Understand**.
 
-The phone scans the repo for function and method signatures, packs a file tree and a few key file heads, and asks the model selected on the Vibe tab for an overview, a Mermaid flow diagram, and a Mermaid sequence diagram. The scanned function defs are appended to the markdown. The tab renders that markdown in place, including the diagrams. Tap **Source** for the raw text. Keys stay on the phone. Tap **Save** to write `UNDERSTAND.md` in the repo root. If that file already exists, the tab loads it when you open the project.
+The phone scans the repo for function and method signatures, packs a file tree and a few key file heads, and asks the model selected on the Vibe tab for code ratings (bar + pie graphs at the top), a concrete issues list, an overview, a Mermaid flow diagram, and a Mermaid sequence diagram. The scanned function defs are appended to the markdown. The tab renders that markdown in place, including the diagrams. Tap **Source** for the raw text. Keys stay on the phone. Tap **Save** to write `UNDERSTAND.md` in the repo root. If that file already exists, the tab loads it when you open the project.
 
 ## Vibe
 
-Pick OpenAI, Anthropic, Gemini, Grok, OpenRouter, Cursor, or Custom. The model and base URL start filled in and can be changed. API keys are in Settings. OpenRouter model ids include the vendor, like `anthropic/claude-sonnet-5`.
+Pick OpenAI, Anthropic, Gemini, Grok, OpenRouter, or Custom. The model and base URL start filled in and can be changed. API keys are in Settings. OpenRouter model ids include the vendor, like `anthropic/claude-sonnet-5`.
 
-Every provider except Cursor runs as an agent on the phone. The model calls tools, the phone runs them on the open repo, and the results go back to the model until it finishes, for at most 40 steps. The tools are list, read, grep, find-and-replace edit, write, delete, git status, git diff, the JavaScript checks and tests, and a Cloud Run build when the repo has `gradlew`. Each step shows in the chat. Send turns into Stop while the agent works; Stop takes effect after the current model call returns. If the repo has `AGENTS.md`, `CLAUDE.md`, or `.cursorrules`, the agent reads it first. The model needs tool calling.
-
-Cursor uses a key from the Cursor dashboard. Each send starts a cloud agent with no repository and waits for one reply with whole files, which the phone writes.
+Every send runs as an agent on the phone in two phases. First a short **plan** phase with read-only tools (list, read, grep, git status, git diff), at most 12 steps. Then an **execute** phase with the full tools, at most 40 steps, following that plan. The phone runs each tool on the open repo and sends results back until the model finishes. The write tools are find-and-replace edit, write, delete, the JavaScript checks and tests, and a Cloud Run build when the repo has `gradlew`. Each step shows in the chat. Send turns into Stop while the agent works; Stop takes effect after the current model call returns. If the repo has `AGENTS.md`, `CLAUDE.md`, or `.cursorrules`, the agent reads it first. The model needs tool calling.
 
 | Provider | Default model | Base URL |
 | --- | --- | --- |
@@ -96,7 +94,6 @@ Cursor uses a key from the Cursor dashboard. Each send starts a cloud agent with
 | Gemini | `gemini-3.8-flash` | `https://generativelanguage.googleapis.com/v1beta` |
 | Grok | `grok-4.6` | `https://api.x.ai/v1` |
 | OpenRouter | `anthropic/claude-sonnet-5` | `https://openrouter.ai/api/v1` |
-| Cursor | `composer-2.5` | `https://api.cursor.com` |
 
 Keys stay in encrypted app storage on the phone. A build upload does not include them. **Revise** on the Build tab is what calls the model, and that call goes from the phone straight to the provider.
 

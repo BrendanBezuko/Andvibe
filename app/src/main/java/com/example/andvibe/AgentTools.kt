@@ -117,6 +117,10 @@ object AgentTools {
         )
     )
 
+    private val planNames = setOf("list_dir", "read_file", "grep", "git_status", "git_diff")
+
+    val planSpecs: List<ToolSpec> = specs.filter { it.name in planNames }
+
     fun run(name: String, args: JSONObject, ctx: AgentContext): String {
         return when (name) {
             "list_dir" -> listDir(ctx, args.optString("path", "."), args.optInt("depth", 1))
