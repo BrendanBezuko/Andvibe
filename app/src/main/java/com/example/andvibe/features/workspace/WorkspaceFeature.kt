@@ -34,7 +34,8 @@ class WorkspaceFeature(
         val current = WorkspaceStore.current()
         val blocked = when {
             tasks.holds(Res.AGENT) -> tasks.newest()?.label ?: "Agent working"
-            tasks.holds(Res.BUILD) || tasks.holds(Res.REVISE) || tasks.holds(Res.UNDERSTAND) ->
+            tasks.holds(Res.BUILD) || tasks.holds(Res.REVISE) || tasks.holds(Res.UNDERSTAND) ||
+                tasks.holds(Res.BOARD) ->
                 tasks.newest()?.label
             else -> null
         }

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg"
@@ -7,18 +8,109 @@
     android:focusable="true"
     android:orientation="vertical">
 
-    <TextView
-        android:id="@+id/boardScope"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="2dp">
+
+        <TextView
+            android:id="@+id/boardScope"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:includeFontPadding="false"
+            android:textColor="@color/muted"
+            android:textSize="12sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/boardRecord"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:contentDescription="Record voice notes for the board"
+            android:fontFamily="monospace"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:letterSpacing="0"
+            android:minWidth="0dp"
+            android:minHeight="36dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="14dp"
+            android:text="REC"
+            android:textAllCaps="false"
+            android:textColor="@color/ink"
+            android:textSize="12sp"
+            app:cornerRadius="4dp"
+            app:icon="@drawable/ic_mic"
+            app:iconGravity="textStart"
+            app:iconPadding="6dp"
+            app:iconSize="16dp"
+            app:iconTint="@color/ink"
+            app:strokeColor="@color/line"
+            app:strokeWidth="1dp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/boardStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
         android:fontFamily="monospace"
         android:includeFontPadding="false"
+        android:maxLines="2"
         android:paddingStart="12dp"
-        android:paddingTop="10dp"
         android:paddingEnd="12dp"
         android:paddingBottom="6dp"
         android:textColor="@color/muted"
-        android:textSize="12sp" />
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:includeFontPadding="false"
+            android:paddingBottom="4dp"
+            android:text="REQUIREMENTS"
+            android:textColor="@color/muted"
+            android:textSize="11sp" />
+
+        <ScrollView
+            android:id="@+id/boardRequirementsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="120dp"
+            android:background="@drawable/bg_tape"
+            android:fillViewport="true"
+            android:scrollbars="vertical">
+
+            <TextView
+                android:id="@+id/boardRequirements"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:includeFontPadding="false"
+                android:lineSpacingExtra="2dp"
+                android:padding="10dp"
+                android:text="Speak to draft requirements and board cards."
+                android:textColor="@color/tape_ink"
+                android:textIsSelectable="true"
+                android:textSize="12sp" />
+        </ScrollView>
+    </LinearLayout>
 
     <HorizontalScrollView
         android:layout_width="match_parent"

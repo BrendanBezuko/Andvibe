@@ -1,7 +1,8 @@
 # TODO
 
 ## Bugs (known, confirmed in code audit — all fixed structurally by the rebuild)
-- Commit button not working unless i spam it (needs blockign maybe)
+- Apps don't reinstall, i have to delete them than install the apk
+- Commit button not working unless i spam it (needs blocking maybe)
 - commit message btn not working
 - when on a stab say board and you press console you can't exit console without leave to a different tab
 - `buildBusy` race: the agent's `cloud_build` tool and the Build tab check-then-set the flag
@@ -17,20 +18,6 @@
 - Unsynchronized cross-thread state: `gitSnapshot`, `vibeResult`, `find*`, `AppState.history`,
   `AppState.chat` → rebuild Phases 2–4.
 
-## Now — architecture rebuild (`DESIGN.md`)
-- [x] Phase 0: extract pure core (`ZipWriter`, `BoundedLog`) + 27 JVM tests
-- [x] Phase 1: `AppGraph` + `ProjectSession`; `SecretStore` app-scoped; kill `GitOps` globals
-- [x] Phase 2: `TaskRunner` (coroutines, cancellation, resource locks, busy derived)
-- [x] Phase 3: `AgentRuntime` (event stream, `ToolRegistry`) + shared `BuildService`
-- [x] Phase 4: per-tab features (Search → Understand → Build → Console → Git → Vibe → rest);
-      persist draft text (Vibe prompt, commit message) when touching those tabs
-- [x] Phase 5: delete `AppState`/`UiBridge`; MainActivity → nav shell
-- [x] Phase 6: hardening (`:core` module, deprecation migrations below)
-
-Per phase/tab smoke pass before checking the box: open → main action → rotate → background →
-notification fires → MCP still responds. The rebuild's biggest risk is silent behavior drift,
-not package layout. Nothing from Should/Could/Roadmap starts until Phase 5 is done.
-
 ## Style/consistency (`STYLE.md`) — opportunistic, not a phase
 Do these when already touching the file, never as standalone rebuild work:
 - Add `raised` (#21262D) to `colors.xml`; make the Understand WebView take its palette from
@@ -39,8 +26,7 @@ Do these when already touching the file, never as standalone rebuild work:
 - Map the andvibe.org shadcn theme to the app palette (website work, not app work).
 
 ## Must have
-- Easy fork workflow: fork a repo and work privately against my own remote.
-- Play Store release checklist: `app.andvibe` application id; Play flavor without
+f- Play Store release checklist: `app.andvibe` application id; Play flavor without
   `REQUEST_INSTALL_PACKAGES`; MCP compiled out of release builds (verify, not just disabled);
   privacy policy + terms linked from the website; closed testing track, then paid testers.
 
@@ -58,17 +44,7 @@ Do these when already touching the file, never as standalone rebuild work:
   arbitrary Docker images (builder, MobSF, and user-chosen services) automatically against
   that host — same URL + token contract as today's `/build`, without naming Cloud Run.
 
-
 ## Could have
-- Voice agent.
-- RAG-index the open codebase for the agent (open question — decide if it earns its keep).
+- ~~Small voice-record app: capture spoken input and turn it into user stories (and other
+  requirements) for the Board / backlog.~~
 
-## Roadmap
-- Hybrid expert agent: the local agent is only a start. Move to a hybrid expert system and
-  optimize token use; this is the platform for fine-tuning how the agent works.
-- CVE/CWE discovery: local and/or remote scanning (architecture TBD) so a vibed app can be
-  checked for threats to the phone, complementing Play Protect.
-- UX: improve the overall experience across the app (keep `STYLE.md` as the contract).
-- Caching and performance: Redis or other caching where it fits.
-- Audio first: the whole workflow by voice — phone + AirPods as good as a laptop, e.g. while
-  walking the dog. Nothing limits this to Android apps.

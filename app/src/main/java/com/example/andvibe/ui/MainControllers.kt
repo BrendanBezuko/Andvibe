@@ -9,9 +9,11 @@ import com.example.andvibe.ApkLibrary
 import com.example.andvibe.AppGraph
 import com.example.andvibe.BuildHistory
 import com.example.andvibe.R
+import com.example.andvibe.RequirementsStore
 import com.example.andvibe.SecretStore
 import com.example.andvibe.Tab
 import com.example.andvibe.databinding.ActivityMainBinding
+import com.example.andvibe.features.board.BoardFeature
 import com.example.andvibe.features.build.BuildFeature
 import com.example.andvibe.features.git.GitFeature
 import com.example.andvibe.features.search.SearchFeature
@@ -39,6 +41,7 @@ class MainControllers(
     private val ensureTrackedBackground: () -> Unit,
     private val requestBackground: () -> Unit,
     private val batteryExempt: () -> Boolean,
+    private val requestMicPermission: (onResult: (Boolean) -> Unit) -> Unit,
 ) {
     lateinit var console: ConsolePageController
         private set
@@ -76,7 +79,10 @@ class MainControllers(
 
     fun switchedWorkspace() {
         if (editing()) files.closeEditor(save = true)
+        board.stopSpeech()
         workspace.fitAfterSwitch()
+        graph.boardFeature.refresh()
+        if (::board.isInitialized) board.renderBoard()
         graph.buildFeature.loadFromStores()
         build.clearShownApks()
         workspace.renderWorkspace()
@@ -142,6 +148,7 @@ class MainControllers(
                 graph.vibeFeature.forgetWorkspace(id)
                 ApkLibrary.forget(activity, id)
                 BuildHistory.forget(id)
+                RequirementsStore.forget(id)
             },
         )
         workspace.start()
@@ -155,6 +162,17 @@ class MainControllers(
             feature = graph.boardFeature,
             inflate = activity.layoutInflater,
             startVibeFromBoard = { startVibeFromBoard(it) },
+            providerCreds = {
+                val provider = vibe.currentProvider()
+                BoardFeature.Creds(
+                    provider,
+                    store.get(provider, "key", ""),
+                    store.get(provider, "model", provider.defaultModel),
+                    store.get(provider, "base", provider.defaultBase),
+                )
+            },
+            saveProvider = { vibe.saveCurrentProvider() },
+            requestMicPermission = requestMicPermission,
         )
         board.start()
     }

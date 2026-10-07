@@ -75,6 +75,10 @@ The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or
 
 Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a file, or Stage all, then Commit. Message asks the model for a subject and does not commit. The commit list is the history of the current branch. Name, email, HTTPS token, SSH key, and this project's origin are in Settings.
 
+## Board
+
+The Board tab is a workspace kanban (Features, Bugs, Solutions, Completed). Tap a card to send it to Vibe. Tap **REC** to speak notes: the phone records audio, your provider transcribes it (OpenAI/OpenRouter/Grok/Custom Whisper endpoint, or Gemini audio), then your chat model updates a living `REQUIREMENTS.md` and adds new cards. The doc shows above the columns and is kept per workspace; when a project is open it is also written as `REQUIREMENTS.md` in that repo. Tap **STOP** when finished. Anthropic cannot transcribe by itself. The Board voice system prompt is editable in Settings.
+
 ## Understand
 
 Open a project, then open the Understand tab (brain icon). Optionally type a focus, such as the agent loop or the build path. Tap **Understand**.

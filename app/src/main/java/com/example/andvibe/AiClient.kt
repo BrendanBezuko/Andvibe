@@ -5,11 +5,14 @@ import com.example.andvibe.core.RepoFiles
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.ArrayDeque
+import java.util.Base64
+import java.util.Locale
 
 data class EditResult(val report: String, val written: List<File>)
 
@@ -104,6 +107,36 @@ object AiClient {
         }
         WorkspaceStore.addUse(model, charged.input, charged.output)
         return reply.text.trim()
+    }
+
+    /**
+     * Speech-to-text via the selected provider: OpenAI-compatible
+     * `/audio/transcriptions` (Whisper), or Gemini multimodal generateContent.
+     */
+    fun transcribe(
+        audio: File,
+        provider: Provider,
+        key: String,
+        base: String,
+    ): String {
+        if (!audio.isFile || audio.length() == 0L) error("recording is empty")
+        if (audio.length() > 24L * 1024 * 1024) error("recording is too large (max 24MB)")
+        if (key.isBlank()) error("add an API key in Settings")
+        val baseUrl = base.ifBlank { provider.defaultBase }
+        if (baseUrl.isBlank()) error("set a base URL")
+        if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
+            error("base URL must start with https://")
+        }
+        val text = when (provider) {
+            Provider.ANTHROPIC -> error(
+                "Board voice needs OpenAI, OpenRouter, Gemini, Grok, or Custom for transcription"
+            )
+            Provider.GEMINI -> geminiTranscribe(baseUrl, key, audio)
+            else -> openaiTranscribe(baseUrl, key, provider, audio)
+        }.trim()
+        if (text.isEmpty()) error("transcription was empty")
+        WorkspaceStore.addUse(transcriptionModel(provider), guessTokens(audio.length().toInt()), guessTokens(text.length))
+        return text
     }
 
     fun research(
@@ -603,6 +636,147 @@ object AiClient {
         val trimmed = base.trim().trimEnd('/')
         if (trimmed.contains(":generateContent")) return trimmed
         return "$trimmed/models/$model:generateContent"
+    }
+
+    internal fun transcriptionUrl(base: String): String {
+        val trimmed = base.trim().trimEnd('/')
+        return when {
+            trimmed.endsWith("/audio/transcriptions") -> trimmed
+            trimmed.endsWith("/chat/completions") ->
+                trimmed.removeSuffix("/chat/completions") + "/audio/transcriptions"
+            trimmed.endsWith("/responses") ->
+                trimmed.removeSuffix("/responses") + "/audio/transcriptions"
+            else -> "$trimmed/audio/transcriptions"
+        }
+    }
+
+    internal fun transcriptionModel(provider: Provider): String = when (provider) {
+        Provider.OPENROUTER -> "openai/whisper-1"
+        Provider.OPENAI -> "whisper-1"
+        Provider.GROK -> "whisper-1"
+        Provider.CUSTOM -> "whisper-1"
+        Provider.GEMINI -> Provider.GEMINI.defaultModel
+        Provider.ANTHROPIC -> "whisper-1"
+    }
+
+    private fun openaiTranscribe(
+        base: String,
+        key: String,
+        provider: Provider,
+        audio: File,
+    ): String {
+        val boundary = "andvibe${System.currentTimeMillis()}"
+        val model = transcriptionModel(provider)
+        val url = transcriptionUrl(base)
+        val headers = linkedMapOf(
+            "Authorization" to "Bearer $key",
+        )
+        headers.putAll(extraHeaders(provider))
+        val body = multipartTranscription(boundary, model, audio)
+        val raw = postMultipart(url, headers, boundary, body)
+        return JSONObject(raw).optString("text").trim().ifBlank {
+            error("model did not return a transcript")
+        }
+    }
+
+    private fun geminiTranscribe(base: String, key: String, audio: File): String {
+        val model = Provider.GEMINI.defaultModel
+        val mime = when (audio.extension.lowercase(Locale.US)) {
+            "m4a", "mp4", "aac" -> "audio/mp4"
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            "ogg" -> "audio/ogg"
+            "webm" -> "audio/webm"
+            else -> "audio/mp4"
+        }
+        val b64 = Base64.getEncoder().encodeToString(audio.readBytes())
+        val body = JSONObject()
+            .put(
+                "contents",
+                JSONArray().put(
+                    JSONObject().put(
+                        "parts",
+                        JSONArray()
+                            .put(
+                                JSONObject().put(
+                                    "inline_data",
+                                    JSONObject().put("mime_type", mime).put("data", b64),
+                                ),
+                            )
+                            .put(
+                                JSONObject().put(
+                                    "text",
+                                    "Transcribe the spoken words exactly. Reply with only the transcript text.",
+                                ),
+                            ),
+                    ),
+                ),
+            )
+            .put("generationConfig", JSONObject().put("maxOutputTokens", 4096))
+            .toString()
+        val url = geminiUrl(base, model) + "?key=" + java.net.URLEncoder.encode(key, "UTF-8")
+        val raw = post(url, emptyMap(), body)
+        val json = JSONObject(raw)
+        val parts = json.optJSONArray("candidates")
+            ?.optJSONObject(0)
+            ?.optJSONObject("content")
+            ?.optJSONArray("parts")
+            ?: error(json.optJSONObject("promptFeedback")?.toString() ?: "empty transcription")
+        val out = StringBuilder()
+        for (i in 0 until parts.length()) {
+            out.append(parts.optJSONObject(i)?.optString("text").orEmpty())
+        }
+        return out.toString().trim()
+    }
+
+    private fun multipartTranscription(boundary: String, model: String, audio: File): ByteArray {
+        val crlf = "\r\n"
+        val name = audio.name.ifBlank { "audio.m4a" }
+        val prefix = buildString {
+            append("--").append(boundary).append(crlf)
+            append("Content-Disposition: form-data; name=\"model\"").append(crlf).append(crlf)
+            append(model).append(crlf)
+            append("--").append(boundary).append(crlf)
+            append("Content-Disposition: form-data; name=\"file\"; filename=\"")
+            append(name).append('"').append(crlf)
+            append("Content-Type: audio/mp4").append(crlf).append(crlf)
+        }.toByteArray(Charsets.UTF_8)
+        val suffix = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
+        val bytes = audio.readBytes()
+        return ByteArray(prefix.size + bytes.size + suffix.size).also { out ->
+            System.arraycopy(prefix, 0, out, 0, prefix.size)
+            System.arraycopy(bytes, 0, out, prefix.size, bytes.size)
+            System.arraycopy(suffix, 0, out, prefix.size + bytes.size, suffix.size)
+        }
+    }
+
+    private fun postMultipart(
+        url: String,
+        headers: Map<String, String>,
+        boundary: String,
+        body: ByteArray,
+    ): String {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 20_000
+            conn.readTimeout = 180_000
+            conn.doOutput = true
+            conn.setRequestProperty("Accept", "application/json")
+            conn.setRequestProperty("User-Agent", "AndVibe")
+            conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
+            DataOutputStream(conn.outputStream).use { it.write(body) }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) error(httpError(code, text))
+            return text
+        } catch (e: IOException) {
+            error("network: ${e.message}")
+        } finally {
+            conn.disconnect()
+        }
     }
 
     internal fun post(url: String, headers: Map<String, String>, body: String): String {

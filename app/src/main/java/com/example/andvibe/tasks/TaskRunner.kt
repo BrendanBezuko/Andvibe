@@ -25,6 +25,7 @@ object Res {
     val FEED = Resource("feed")
     val DOWNLOAD = Resource("download")
     val IMPORT = Resource("import")
+    val BOARD = Resource("board")
 }
 
 /**

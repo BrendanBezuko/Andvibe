@@ -11,6 +11,9 @@ class BoardFeatureTest {
         val state = BoardFeature.State()
         assertTrue(state.cards.isEmpty())
         assertFalse(state.agentBusy)
+        assertFalse(state.listening)
+        assertFalse(state.drafting)
+        assertTrue(state.requirements.isEmpty())
     }
 
     @Test

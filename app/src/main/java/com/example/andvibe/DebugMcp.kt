@@ -324,6 +324,7 @@ object DebugMcp {
             append("downloadBusy=${tasks.holds(Res.DOWNLOAD)}\n")
             append("importBusy=${tasks.holds(Res.IMPORT)}\n")
             append("consoleBusy=${tasks.holds(Res.CONSOLE)}\n")
+            append("boardBusy=${tasks.holds(Res.BOARD)}\n")
             append("anyBusy=${g.anyBusy()}\n")
             append("busyLabel=${g.busyLabel().orEmpty()}\n")
             append("lastApk=${g.buildFeature.state.value.lastApkPath.orEmpty()}\n")

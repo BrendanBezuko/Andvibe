@@ -218,7 +218,8 @@ class AppGraph(app: Application) {
             },
             onLogChanged = { shell.logChanged() },
         )
-        boardFeature = BoardFeature(tasks)
+        RequirementsStore.init(app)
+        boardFeature = BoardFeature(tasks, dispatchers, session, logLine)
         workspaceFeature = WorkspaceFeature(tasks)
         settingsFeature = SettingsFeature(app, secrets, onMcpChanged = { shell.mcpChanged() })
         buildFeature.loadFromStores()
@@ -245,5 +246,6 @@ class AppGraph(app: Application) {
 
     fun workBusy(): Boolean =
         tasks.holds(Res.AGENT) || tasks.holds(Res.BUILD) ||
-            tasks.holds(Res.REVISE) || tasks.holds(Res.UNDERSTAND)
+            tasks.holds(Res.REVISE) || tasks.holds(Res.UNDERSTAND) ||
+            tasks.holds(Res.BOARD)
 }

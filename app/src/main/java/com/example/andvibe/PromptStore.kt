@@ -39,6 +39,11 @@ object PromptStore {
             "commit",
             "Commit subject",
             "One-line git commit subject from the Git tab Message button."
+        ),
+        BOARD(
+            "board",
+            "Board voice",
+            "Turns transcribed Board voice notes into REQUIREMENTS.md and kanban cards."
         )
     }
 
@@ -217,5 +222,27 @@ object PromptStore {
         """.trimIndent()
 
         Kind.COMMIT -> "Reply with one git commit subject and nothing else. No quotes."
+
+        Kind.BOARD -> """
+            You turn spoken product notes into a living requirements document and kanban cards
+            for AndVibe's Board tab.
+
+            Reply with one JSON object and nothing else:
+            {"requirements_md":"# Requirements\n...","cards":[{"column":"idea"|"bug"|"solution","title":"short title","body":"optional note"}]}
+
+            Rules:
+            - Merge the new spoken notes into Current REQUIREMENTS.md. Keep useful prior content.
+              Rewrite the full markdown document each time (not a diff). Use clear headings and
+              short bullets. Prefer user-story phrasing ("As a …, I …") when it fits.
+            - cards must only contain NEW work items implied by the spoken notes that are not
+              already listed under Existing board cards. Do not repeat titles. At most 8 cards.
+            - column: idea for features/stories, bug for defects, solution for concrete fixes
+              or approaches. Never use completed.
+            - Titles ≤ 80 characters. Bodies short (one or two sentences) or empty.
+            - If the speech is only clarifying requirements and adds no discrete board items,
+              return an empty cards array and still update requirements_md.
+            - Do not invent features that were not said or strongly implied. Do not wrap the
+              JSON in markdown fences.
+        """.trimIndent()
     }
 }

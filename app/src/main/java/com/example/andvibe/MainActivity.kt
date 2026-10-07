@@ -94,6 +94,13 @@ class MainActivity : AppCompatActivity() {
         if (::controllers.isInitialized) controllers.settings.renderBackground()
     }
 
+    private var micPermissionCallback: ((Boolean) -> Unit)? = null
+    private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val cb = micPermissionCallback
+        micPermissionCallback = null
+        cb?.invoke(granted)
+    }
+
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
             if (::controllers.isInitialized && controllers.settings.isOpen) {
@@ -140,6 +147,10 @@ class MainActivity : AppCompatActivity() {
             ensureTrackedBackground = { ensureTrackedBackground() },
             requestBackground = { requestBackground() },
             batteryExempt = { batteryExempt() },
+            requestMicPermission = { onResult ->
+                micPermissionCallback = onResult
+                askMic.launch(Manifest.permission.RECORD_AUDIO)
+            },
         )
         controllers.startAll()
         setupNav()
@@ -180,6 +191,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         if (::controllers.isInitialized) {
+            controllers.board.stopSpeech()
             controllers.files.saveEditor(announce = false)
             if (controllers.settings.isOpen) controllers.settings.saveApiKeys(announce = false)
             controllers.vibe.saveCurrentProvider()
@@ -372,12 +384,16 @@ class MainActivity : AppCompatActivity() {
             controllers.settings.close()
             controllers.workspace.close()
             if (tab != Tab.FILES) controllers.files.saveEditor(announce = false)
+            if (tab != Tab.BOARD) controllers.board.stopSpeech()
         }
         applyTab(tab)
         syncNav(tab)
         if (!::controllers.isInitialized) return
         when (tab) {
-            Tab.BOARD -> controllers.board.renderBoard()
+            Tab.BOARD -> {
+                graph.boardFeature.refresh()
+                controllers.board.renderBoard()
+            }
             Tab.BUILD -> {
                 controllers.build.onTabVisible()
                 controllers.build.onExternalUpdate()
