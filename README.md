@@ -4,9 +4,26 @@
 
 # AndVibe
 
+**Website:** [andvibe.org](https://andvibe.org) · **Releases:** [GitHub Releases](https://github.com/BrendanBezuko/Andvibe/releases)
+
 AndVibe is an Android app for cloning a repo, editing it with your own model key, and building it. JavaScript and HTML run on the phone. A project with `gradlew` is compiled on Cloud Run.
 
 The app has these tabs: Console, Board, Search, Files, Understand, Vibe, Build, and Git. Console also opens Settings, which shows whether the debug log server is listening.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screens/board.png" alt="Board" width="180" />
+  <img src="docs/screens/search.png" alt="Search" width="180" />
+  <img src="docs/screens/files.png" alt="Files" width="180" />
+  <img src="docs/screens/understand.png" alt="Understand" width="180" />
+</p>
+<p align="center">
+  <img src="docs/screens/vibe.png" alt="Vibe" width="180" />
+  <img src="docs/screens/build.png" alt="Build" width="180" />
+  <img src="docs/screens/git.png" alt="Git" width="180" />
+  <img src="docs/screens/console.png" alt="Console" width="180" />
+</p>
 
 ## Install AndVibe
 
@@ -91,13 +108,13 @@ Pick OpenAI, Anthropic, Gemini, Grok, OpenRouter, or Custom. The model and base 
 
 Every send runs as an agent on the phone in two phases. First a short **plan** phase with read-only tools (list, read, grep, git status, git diff), at most 12 steps. Then an **execute** phase with the full tools, at most 40 steps, following that plan. The phone runs each tool on the open repo and sends results back until the model finishes. The write tools are find-and-replace edit, write, delete, the JavaScript checks and tests, and a Cloud Run build when the repo has `gradlew`. Each step shows in the chat. Send turns into Stop while the agent works; Stop takes effect after the current model call returns. If the repo has `AGENTS.md`, `CLAUDE.md`, or `.cursorrules`, the agent reads it first. The model needs tool calling.
 
-| Provider | Default model | Base URL |
-| --- | --- | --- |
-| OpenAI | `gpt-6.1-sol` | `https://api.openai.com/v1` |
-| Anthropic | `claude-sonnet-5` | `https://api.anthropic.com` |
-| Gemini | `gemini-3.8-flash` | `https://generativelanguage.googleapis.com/v1beta` |
-| Grok | `grok-4.6` | `https://api.x.ai/v1` |
-| OpenRouter | `anthropic/claude-sonnet-5` | `https://openrouter.ai/api/v1` |
+| Provider   | Default model               | Base URL                                           |
+| ---------- | --------------------------- | -------------------------------------------------- |
+| OpenAI     | `gpt-6.1-sol`               | `https://api.openai.com/v1`                        |
+| Anthropic  | `claude-sonnet-5`           | `https://api.anthropic.com`                        |
+| Gemini     | `gemini-3.8-flash`          | `https://generativelanguage.googleapis.com/v1beta` |
+| Grok       | `grok-4.6`                  | `https://api.x.ai/v1`                              |
+| OpenRouter | `anthropic/claude-sonnet-5` | `https://openrouter.ai/api/v1`                     |
 
 Keys stay in encrypted app storage on the phone. A build upload does not include them. **Revise** on the Build tab is what calls the model, and that call goes from the phone straight to the provider.
 
@@ -208,13 +225,13 @@ gcloud builds log <build-id> --region us-central1 --project <project-id>
 
 Optional environment variables, comma-separated in `--set-env-vars`:
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `BUILD_TOKEN` | empty | Bearer token required by `/build`. Empty rejects every build. |
-| `BUILD_TIMEOUT` | `3000` | Seconds for one Gradle run. |
-| `VT_API_KEY` | empty | VirusTotal API key. When set, each APK is scanned before it is sent and the verdict shows in the Build tab. Empty skips the scan. |
-| `VT_TIMEOUT` | `240` | Seconds to wait for VirusTotal results. After that the APK is sent with a link to the report. |
-| `AUTH_PLUGIN` | empty | Python module name. When a request's bearer token is not `BUILD_TOKEN`, the server calls the module's `check(header, task)`. `None` allows the build. A `(status, text)` tuple refuses it. |
+| Variable        | Default | Meaning                                                                                                                                                                                    |
+| --------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BUILD_TOKEN`   | empty   | Bearer token required by `/build`. Empty rejects every build.                                                                                                                              |
+| `BUILD_TIMEOUT` | `3000`  | Seconds for one Gradle run.                                                                                                                                                                |
+| `VT_API_KEY`    | empty   | VirusTotal API key. When set, each APK is scanned before it is sent and the verdict shows in the Build tab. Empty skips the scan.                                                          |
+| `VT_TIMEOUT`    | `240`   | Seconds to wait for VirusTotal results. After that the APK is sent with a link to the report.                                                                                              |
+| `AUTH_PLUGIN`   | empty   | Python module name. When a request's bearer token is not `BUILD_TOKEN`, the server calls the module's `check(header, task)`. `None` allows the build. A `(status, text)` tuple refuses it. |
 
 To turn on the VirusTotal scan, add the key without touching `BUILD_TOKEN`. `--set-env-vars` replaces every variable, so use `--update-env-vars`:
 
