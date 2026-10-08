@@ -4,11 +4,34 @@
 
 # AndVibe
 
-**Website:** [andvibe.org](https://andvibe.org) · **Releases:** [GitHub Releases](https://github.com/BrendanBezuko/Andvibe/releases)
+AndVibe is an Android app for building Android Apps
 
-AndVibe is an Android app for cloning a repo, editing it with your own model key, and building it. JavaScript and HTML run on the phone. A project with `gradlew` is compiled on Cloud Run.
+Apache License Version 2.0
+BYOK - Bring your own keys
+BYOC - Bring your own cloud
 
-The app has these tabs: Console, Board, Search, Files, Understand, Vibe, Build, and Git. Console also opens Settings, which shows whether the debug log server is listening.
+A feature rich Starting point for an Android IDE and Software engineering agent, the narrow focus is local debugging Apks build from concept to app.
+
+**Website:** [andvibe.org](https://andvibe.org) · **Download:** [GitHub Releases](https://github.com/BrendanBezuko/Andvibe/releases)
+
+- Cloning a repo
+- Edit it with your own local agent and llm host (your own hosted LLMs, Anthropic, Google, Openai, Openrouter compatible)
+- `gradlew` is compiled on in a docker on Cloud Run
+- Voice Kanban agent
+- Project and workspaces
+
+Use each tab like this:
+
+1. Console - Set keys
+2. Board - To write user requirments.
+3. Search - Search foss for similar projects as starting points
+4. Files - Confirm the files and make any necessary manual edits
+5. Understand - Generate a full breakdown of the current project
+6. Vibe - plan, scafold...
+7. Build - Builds in remote docker image
+8. Git - versioning
+
+Console also opens Settings, which shows whether the debug log server is listening.
 
 ## Screenshots
 
@@ -26,6 +49,8 @@ The app has these tabs: Console, Board, Search, Files, Understand, Vibe, Build, 
 </p>
 
 ## Install AndVibe
+
+Download from the release tab.
 
 Open the cloned repo folder in Android Studio, wait for Gradle sync, pick a phone or emulator, and press Run. In the commands below, `<repo-path>` is that folder. Run `pwd` inside it to print the full path.
 
