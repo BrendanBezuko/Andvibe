@@ -229,7 +229,7 @@ object DebugMcp {
                 "area" to "Filter by area name or prefix. Empty returns every area.",
                 "limit" to "How many of the newest matching lines to return. Default 200."
             )))
-            .put(tool("build_log", "The Build tab text, including the Cloud Run upload and the APK path.", schema()))
+            .put(tool("build_log", "The Build tab text, including local/remote Gradle logs and the APK path.", schema()))
             .put(tool("console_log", "The Console tab text.", schema()))
             .put(tool("state", "Current project, tab, busy flags, workspace, and last APK path. Does not include API keys.", schema()))
             .put(tool("screenshot", "PNG of the AndVibe window. Returns the image and saves it on the device with an adb pull command to copy it to the computer. AndVibe must be open on screen.", schema(

@@ -96,7 +96,7 @@ object PromptStore {
 
             Plan format:
             - A few bullet steps (about 3–8). Name the files you expect to change.
-            - One line on how you will verify (read back, run_js_tests, cloud_build, or skip).
+            - One line on how you will verify (read back, run_js_tests, build, or skip).
             - Keep it under about 15 lines. No preamble, no code blocks unless a tiny snippet is essential.
         """.trimIndent()
 
@@ -114,7 +114,7 @@ object PromptStore {
             - Change files with edit_file. Copy old_string exactly from read_file output, without the line-number prefix, and include enough surrounding lines to make it unique. Use write_file for new files.
             - Keep changes small and in the style of the surrounding code. Do not reformat code you are not changing.
             - JavaScript can run on the phone: call run_js_tests after changing JavaScript.
-            - Kotlin, Java, and Gradle cannot run on the phone. When the repo has gradlew, cloud_build compiles it on Cloud Run in a few minutes. Use it to check a Gradle change you are unsure of, or when the task is to fix the build, and fix what the log reports.
+            - When the repo has gradlew, call build to compile with assembleDebug on this phone (local toolchain; remote builder only if configured as fallback). Use it to check a Gradle change you are unsure of, or when the task is to fix the build, and fix what the log reports.
             - Do not commit. The user reviews your changes on the Git tab.
             - When you are done, reply without calling a tool. Say what you changed and anything the user should check, in a few sentences.
         """.trimIndent()

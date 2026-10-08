@@ -1,7 +1,6 @@
 package com.example.andvibe.ui
 
 import android.content.Intent
-import android.net.Uri
 import android.util.TypedValue
 import androidx.activity.result.ActivityResultLauncher
 import androidx.appcompat.app.AppCompatActivity
@@ -220,9 +219,6 @@ class MainControllers(
                 if (::settings.isInitialized) settings.setApiKeyField(provider, key)
             },
             paintBusy = paintBusy,
-            openUrl = { url ->
-                runCatching { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-            },
             runOnUi = { block -> activity.runOnUiThread(block) },
         )
         console.start()

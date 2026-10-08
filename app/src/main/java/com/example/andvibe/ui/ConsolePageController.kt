@@ -31,8 +31,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-private const val PRO_ACCOUNT_URL = "https://andvibe.org/account/"
-
 /**
  * Renders console tape + Secrets/Variables vault. Forwards commands to [ConsoleFeature].
  */
@@ -61,7 +59,6 @@ class ConsolePageController(
     ) -> Unit,
     private val syncApiKeyField: (Provider, String) -> Unit,
     private val paintBusy: () -> Unit,
-    private val openUrl: (String) -> Unit,
     private val runOnUi: ( () -> Unit) -> Unit,
 ) {
     private val vault = mutableMapOf<String, EditText>()
@@ -125,6 +122,7 @@ class ConsolePageController(
         }
         vault["build_token"]?.setText(store.buildToken())
         vault["build_url"]?.setText(store.buildUrl())
+        vault["prefer_remote_build"]?.setText(if (store.preferRemoteBuild()) "true" else "false")
         vault["git_token"]?.setText(store.gitToken())
         vault["git_ssh"]?.setText(store.gitSsh())
         vault["git_name"]?.setText(store.gitName())
@@ -192,16 +190,16 @@ class ConsolePageController(
             vaultField(secrets, "${provider.id}_key", "${provider.label} API key", secret = true)
         }
         vaultField(secrets, "build_token", "Build token", secret = true)
-        vaultLink(secrets, "No Cloud Run of your own? Get a Pro build key at andvibe.org/account", PRO_ACCOUNT_URL)
         vaultField(secrets, "git_token", "Git HTTPS token", secret = true)
         vaultField(secrets, "git_ssh", "SSH private key", secret = true, lines = 4)
 
-        vaultNote(variables, "Models, base URLs, the Cloud Run address, and git identity for the open project.")
+        vaultNote(variables, "Models, base URLs, optional remote builder, and git identity. Gradle builds on-device by default.")
         for (provider in Provider.entries) {
             vaultField(variables, "${provider.id}_model", "${provider.label} model", secret = false)
             vaultField(variables, "${provider.id}_base", "${provider.label} base URL", secret = false)
         }
-        vaultField(variables, "build_url", "Build service URL", secret = false)
+        vaultField(variables, "build_url", "Remote builder URL (optional)", secret = false)
+        vaultField(variables, "prefer_remote_build", "Prefer remote builder (true/false)", secret = false)
         vaultField(variables, "git_name", "Git name", secret = false)
         vaultField(variables, "git_email", "Git email", secret = false)
         vaultField(variables, "git_user", "Git HTTPS user", secret = false)
@@ -214,16 +212,6 @@ class ConsolePageController(
             this.text = text
             setTextColor(color(R.color.muted))
             textSize = 13f
-        })
-    }
-
-    private fun vaultLink(parent: LinearLayout, text: String, url: String) {
-        parent.addView(TextView(parent.context).apply {
-            this.text = text
-            setTextColor(color(R.color.accent))
-            textSize = 13f
-            setPadding(0, dp(6), 0, dp(2))
-            setOnClickListener { openUrl(url) }
         })
     }
 
@@ -294,11 +282,13 @@ class ConsolePageController(
             )
         }
         val url = vaultText("build_url")
+        val preferRemote = vaultText("prefer_remote_build").equals("true", ignoreCase = true)
         val name = vaultText("git_name")
         val email = vaultText("git_email")
         val user = vaultText("git_user")
         val origin = vaultText("git_origin")
         store.saveBuild(url, store.buildToken())
+        store.setPreferRemoteBuild(preferRemote)
         store.saveGit(name, email, user, store.gitToken(), store.gitSsh())
         onVariablesSynced(
             selected,

@@ -89,6 +89,13 @@ class SecretStore(context: Context) {
             .apply()
     }
 
+    /** When true, Gradle builds skip the local toolchain and use the remote builder. */
+    fun preferRemoteBuild(): Boolean = prefs.getBoolean("prefer_remote_build", false)
+
+    fun setPreferRemoteBuild(value: Boolean) {
+        prefs.edit().putBoolean("prefer_remote_build", value).apply()
+    }
+
     fun draftCommitMessage(): String = prefs.getString("draft_commit_msg", "") ?: ""
 
     fun saveDraftCommitMessage(text: String) {

@@ -15,9 +15,9 @@ class ToolRegistryTest {
     private fun ctx(root: File = tmp.root): AgentContext = AgentContext(root, tmp.root)
 
     private fun registry(
-        cloud: (File) -> String = { error("cloud_build not expected") },
+        build: (File) -> String = { error("build not expected") },
         include: (String) -> Unit = {},
-    ) = ToolRegistry(cloudBuild = cloud, includeProject = include)
+    ) = ToolRegistry(build = build, includeProject = include)
 
     @Test
     fun targetRejectsDotDot() {
@@ -88,21 +88,24 @@ class ToolRegistryTest {
     }
 
     @Test
-    fun cloudBuildDelegatesToInjectedCallback() {
+    fun buildDelegatesToInjectedCallback() {
         var seen: File? = null
-        val reg = registry(cloud = { root ->
+        val reg = registry(build = { root ->
             seen = root
             "BUILD SUCCESSFUL\nAPK: app.apk"
         })
-        val out = reg.run("cloud_build", JSONObject(), ctx())
+        val out = reg.run("build", JSONObject(), ctx())
         assertEquals(tmp.root.canonicalFile, seen?.canonicalFile)
         assertTrue(out.contains("BUILD SUCCESSFUL"))
+        val alias = reg.run("cloud_build", JSONObject(), ctx())
+        assertTrue(alias.contains("BUILD SUCCESSFUL"))
     }
 
     @Test
     fun planSpecsAreReadOnlySubset() {
         val names = registry().planSpecs.map { it.name }.toSet()
         assertEquals(setOf("list_dir", "read_file", "grep", "git_status", "git_diff"), names)
+        assertTrue("build" !in names)
         assertTrue("cloud_build" !in names)
         assertTrue("edit_file" !in names)
     }

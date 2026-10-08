@@ -84,6 +84,21 @@ class RepoFilesTest {
     }
 
     @Test
+    fun walkKeepsSourcePackageNamedBuildButSkipsGradleOutput() {
+        val root = tmp.newFolder("walkbuild")
+        File(root, "features/build").mkdirs()
+        File(root, "features/build/BuildFeature.kt").writeText("class BuildFeature")
+        File(root, "app/build/outputs/apk").mkdirs()
+        File(root, "app/build/outputs/apk/app-debug.apk").writeText("apk")
+        File(root, "app/build/intermediates").mkdirs()
+
+        val seen = mutableListOf<String>()
+        RepoFiles.walk(root) { seen.add(RepoFiles.rel(it, root)) }
+        assertTrue(seen.contains("features/build/BuildFeature.kt"))
+        assertFalse(seen.any { it.startsWith("app/build/") })
+    }
+
+    @Test
     fun looksBinaryDetectsNullBytes() {
         val text = tmp.newFile("plain.txt").apply { writeText("hello") }
         val binary = tmp.newFile("blob.bin").apply { writeBytes(byteArrayOf(1, 0, 2)) }

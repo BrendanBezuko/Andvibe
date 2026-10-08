@@ -77,24 +77,29 @@ class BuildFeature(
         clearLog()
         _state.update { it.copy(building = true) }
         tasks.launch("Building APK", Tab.BUILD, setOf(Res.BUILD), dispatchers.repo) {
-            val root = session.projectRoot()
-            val mirrorConsole = File(root, "gradlew").isFile
-            note(RepoFiles.display(root, session.reposDir), mirrorConsole)
-            val outcome = buildService.run(
-                root = root,
-                buildUrl = buildUrl,
-                buildToken = buildToken,
-                mode = BuildService.Mode.AUTO,
-                nestClaim = false,
-                log = { line -> note(line, mirrorConsole) },
-            )
-            if (outcome.apk != null) {
-                _state.update { it.copy(lastApkPath = outcome.apk.absolutePath) }
+            try {
+                val root = session.projectRoot()
+                val mirrorConsole = File(root, "gradlew").isFile
+                note(RepoFiles.display(root, session.reposDir), mirrorConsole)
+                val outcome = buildService.run(
+                    root = root,
+                    buildUrl = buildUrl,
+                    buildToken = buildToken,
+                    mode = BuildService.Mode.AUTO,
+                    nestClaim = false,
+                    log = { line -> note(line, mirrorConsole) },
+                )
+                if (outcome.apk != null) {
+                    _state.update { it.copy(lastApkPath = outcome.apk.absolutePath) }
+                }
+                onBuildChanged()
+                TaskRunner.Done(outcome.title, outcome.summary, outcome.apk)
+            } finally {
+                // Clear after the task releases Res.BUILD — syncBusy() here would see
+                // the lock still held and leave ● BUILDING stuck on the Build tab.
+                _state.update { it.copy(building = false) }
+                onBuildChanged()
             }
-            _state.update { it.copy(building = false) }
-            syncBusy()
-            onBuildChanged()
-            TaskRunner.Done(outcome.title, outcome.summary, outcome.apk)
         }
     }
 
@@ -123,7 +128,7 @@ class BuildFeature(
                 note("Revising from the build log. The API key stays on this phone.", mirrorConsole = true)
                 val tail = log.takeLast(12_000)
                 val instruction = """
-                    The Gradle build failed on Cloud Run. Fix the project so it compiles. Change as little as possible. Cloud Run compiles Kotlin, Java, and Gradle, so edit those files when the log points at them.
+                    The Gradle build failed. Fix the project so it compiles. Change as little as possible. The builder compiles Kotlin, Java, and Gradle, so edit those files when the log points at them.
 
                     Build log:
                     $tail
@@ -148,7 +153,6 @@ class BuildFeature(
                 summary = t.message ?: t.javaClass.simpleName
             } finally {
                 _state.update { it.copy(revising = false) }
-                syncBusy()
                 onBuildChanged()
             }
             TaskRunner.Done(title, summary)

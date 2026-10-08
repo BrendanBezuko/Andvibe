@@ -211,8 +211,8 @@ object AiClient {
             val kids = dir.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })) ?: return
             for (kid in kids) {
                 if (lines.size >= limit) return
-                if (kid.name in RepoFiles.SKIP_DIRS) continue
                 if (kid.isDirectory) {
+                    if (RepoFiles.skipDir(kid)) continue
                     lines.add("$prefix${kid.name}/")
                     walkDir(kid, prefix + kid.name + "/")
                 } else {

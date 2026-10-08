@@ -1,34 +1,43 @@
 package com.example.andvibe
 
 import com.example.andvibe.core.JsRunner
+import com.example.andvibe.core.LocalGradleEngine
 import com.example.andvibe.tasks.Res
 import com.example.andvibe.tasks.TaskRunner
 import android.content.Context
 import java.io.File
 
 /**
- * Single build path for the Build tab and the agent's cloud_build tool
+ * Single build path for the Build tab and the agent's build tool
  * (DESIGN.md §3.7 / Phase 3). Mutual exclusion is Res.BUILD — claimed by
  * TaskRunner.launch for the tab, or nest-claimed here when the agent calls in.
+ *
+ * Gradle projects: local toolchain by default. Remote (BYOC) only when
+ * Variables → Prefer remote builder is on (or [Mode.REMOTE_ONLY]).
+ * Non-Gradle: JsRunner + ApkPackager on device.
  */
 class BuildService(
     private val app: Context,
     private val tasks: TaskRunner,
     private val buildLog: com.example.andvibe.features.build.BuildLog? = null,
     private val onBuildChanged: (() -> Unit)? = null,
+    private val preferRemote: () -> Boolean = { false },
 ) {
     enum class Mode {
-        /** gradlew → Cloud Run; otherwise local JsRunner + ApkPackager. */
+        /** gradlew → local Gradle, or remote only if preferred in settings; else JS pack. */
         AUTO,
-        /** Agent tool: Cloud Run only; errors if no gradlew. */
-        CLOUD_ONLY,
+        /** Agent / explicit: Gradle only (local, unless prefer-remote is on). */
+        GRADLE_ONLY,
+        /** Force remote builder; errors if no gradlew or no URL/token. */
+        REMOTE_ONLY,
     }
 
     data class Outcome(
         val title: String,
         val summary: String,
         val apk: File?,
-        val cloud: Boolean,
+        /** True when the APK came from the remote builder. */
+        val remote: Boolean,
     )
 
     /**
@@ -56,39 +65,35 @@ class BuildService(
         var built: File? = null
         var summary = ""
         var title = "Build failed"
-        var cloud = false
+        var remote = false
+        val hasGradle = File(root, "gradlew").isFile
         try {
-            cloud = File(root, "gradlew").isFile
-            DebugLog.step("build", "start path=${root.absolutePath} gradlew=$cloud mode=$mode")
+            DebugLog.step("build", "start path=${root.absolutePath} gradlew=$hasGradle mode=$mode")
             when {
-                mode == Mode.CLOUD_ONLY || cloud -> {
-                    if (mode == Mode.CLOUD_ONLY && !cloud) {
-                        error("this repo has no gradlew, so Cloud Run cannot build it")
-                    }
-                    if (buildUrl.isBlank() || buildToken.isBlank()) {
-                        title = "Build needs setup"
-                        summary = if (mode == Mode.CLOUD_ONLY) {
-                            "the Cloud Run URL or token is not set. The user sets them on Console → Variables."
-                        } else {
-                            "Set the build URL and token on Console → Variables."
-                        }
-                        sink(summary)
-                        if (mode == Mode.CLOUD_ONLY) error(summary)
-                    } else {
-                        DebugLog.step("build", "mode=cloud")
-                        if (mode == Mode.AUTO) sink("Gradle project. Sending it to Cloud Run.")
-                        val apk = CloudBuild.build(app, root, buildUrl, buildToken, sink)
-                        built = apk
+                mode == Mode.REMOTE_ONLY -> {
+                    if (!hasGradle) error("this repo has no gradlew, so the remote builder cannot build it")
+                    built = remoteBuild(root, buildUrl, buildToken, sink, requireRemote = true)
+                    remote = true
+                    title = "Build ready"
+                    summary = agentOrTabSummary(mode, root, built)
+                }
+                hasGradle -> {
+                    val outcome = gradleBuild(root, buildUrl, buildToken, mode, sink)
+                    built = outcome.first
+                    remote = outcome.second
+                    if (built != null) {
                         title = "Build ready"
-                        summary = if (mode == Mode.CLOUD_ONLY) {
-                            "Agent build: ${apk.name}"
-                        } else {
-                            "${root.name}: ${apk.name}"
-                        }
+                        summary = agentOrTabSummary(mode, root, built)
+                    } else {
+                        title = "Build needs setup"
+                        summary = outcome.third
                     }
                 }
+                mode == Mode.GRADLE_ONLY -> {
+                    error("this repo has no gradlew")
+                }
                 else -> {
-                    DebugLog.step("build", "mode=local")
+                    DebugLog.step("build", "mode=js-pack")
                     sink(JsRunner.detect(root))
                     sink("")
                     sink(JsRunner.compile(root))
@@ -107,15 +112,18 @@ class BuildService(
                 sink(built.absolutePath)
                 if (mode == Mode.AUTO) {
                     sink(
-                        if (cloud) "Tap Install."
-                        else "Tap Install. The new app is named Built app."
+                        when {
+                            remote -> "Tap Install."
+                            hasGradle -> "Tap Install."
+                            else -> "Tap Install. The new app is named Built app."
+                        }
                     )
                 }
             }
         } catch (t: Throwable) {
             DebugLog.step("build", "fail ${t.javaClass.simpleName}: ${t.message}")
             val message = t.message ?: t.javaClass.simpleName
-            if (mode == Mode.CLOUD_ONLY) {
+            if (mode == Mode.GRADLE_ONLY || mode == Mode.REMOTE_ONLY) {
                 summary = "Agent build failed: $message"
                 sink("build failed: $message")
                 throw t
@@ -134,14 +142,14 @@ class BuildService(
             )
             if (nestClaim) tasks.release(Res.BUILD)
         }
-        return Outcome(title, summary, built, cloud)
+        return Outcome(title, summary, built, remote)
     }
 
     /**
-     * Agent cloud_build tool entry. Nest-claims BUILD, optionally mirrors into [buildLog],
+     * Agent build tool entry. Nest-claims BUILD, optionally mirrors into [buildLog],
      * and returns the tool result string.
      */
-    fun agentCloudBuild(
+    fun agentBuild(
         root: File,
         buildUrl: String,
         buildToken: String,
@@ -156,13 +164,13 @@ class BuildService(
                 if (local.length > 200_000) local.delete(0, local.length - 120_000)
             }
         }
-        note("Agent build. Sending ${root.name} to Cloud Run.")
+        note("Agent build for ${root.name}.")
         return try {
             val outcome = run(
                 root = root,
                 buildUrl = buildUrl,
                 buildToken = buildToken,
-                mode = Mode.CLOUD_ONLY,
+                mode = Mode.GRADLE_ONLY,
                 nestClaim = true,
                 log = note,
             )
@@ -173,6 +181,120 @@ class BuildService(
             if (buildLog != null) onBuildChanged?.invoke()
             val message = t.message ?: t.javaClass.simpleName
             "BUILD FAILED: $message\n\n" + tail(synchronized(local) { local.toString() }, 14_000)
+        }
+    }
+
+    @Deprecated("Use agentBuild", ReplaceWith("agentBuild(root, buildUrl, buildToken, buildLog)"))
+    fun agentCloudBuild(
+        root: File,
+        buildUrl: String,
+        buildToken: String,
+        buildLog: com.example.andvibe.features.build.BuildLog? = null,
+    ): String = agentBuild(root, buildUrl, buildToken, buildLog)
+
+    /**
+     * @return Triple(apk, remote, setupMessageIfNoApk)
+     */
+    private fun gradleBuild(
+        root: File,
+        buildUrl: String,
+        buildToken: String,
+        mode: Mode,
+        sink: (String) -> Unit,
+    ): Triple<File?, Boolean, String> {
+        val forceRemote = preferRemote() || mode == Mode.REMOTE_ONLY
+        if (forceRemote) {
+            DebugLog.step("build", "mode=remote (preferred)")
+            sink("Using remote builder (preferred in Variables).")
+            val apk = remoteBuild(root, buildUrl, buildToken, sink, requireRemote = true)
+            return Triple(apk, true, "")
+        }
+
+        val bootstrap = ToolchainBootstrap(app)
+        var st = bootstrap.status()
+        if (!st.ready) {
+            sink("Local toolchain not ready — installing…")
+            try {
+                st = bootstrap.ensure(sink, promptCompanionInstall = true)
+            } catch (t: Throwable) {
+                DebugLog.step("build", "toolchain ensure failed: ${t.message}")
+                sink(t.message ?: "toolchain install failed")
+                return Triple(
+                    null,
+                    false,
+                    t.message
+                        ?: "Local toolchain setup failed. Fix the install, or set Prefer remote builder to true under Console → Variables.",
+                )
+            }
+        }
+
+        val java = st.java
+        if (java == null || !st.sdkReady) {
+            val msg = when {
+                !st.sdkReady ->
+                    "SDK data is missing. Tap Build again after the download finishes."
+                !ToolchainExec.companionInstalled(app) ->
+                    "Install AndVibe Build Tools when prompted, then tap Build again."
+                else ->
+                    "Local Java runtime not found. Install AndVibe Build Tools."
+            }
+            val hint = "$msg To use a remote builder, set Prefer remote builder to true under Console → Variables."
+            sink(hint)
+            return Triple(null, false, hint)
+        }
+
+        CompanionInstaller.linkExecutables(app, st.layout, sink)
+        DebugLog.step("build", "mode=local java=${java.source}")
+        sink("Gradle project. Building on this phone.")
+        val nativeDir = ToolchainExec.companionNativeDir(app)
+        val aapt2 = nativeDir?.let { File(it, com.example.andvibe.core.ToolchainPins.AAPT2_LIB) }
+        return try {
+            val result = LocalGradleEngine.build(
+                root = root,
+                config = LocalGradleEngine.Config(
+                    javaBin = java.javaBin,
+                    javaHome = java.javaHome,
+                    layout = st.layout,
+                    libraryPath = java.javaBin.parentFile?.absolutePath,
+                    aapt2Override = aapt2,
+                ),
+                log = sink,
+                cancelled = { Thread.currentThread().isInterrupted },
+            )
+            val dest = ApkLibrary.place(app, result.apk.name)
+            result.apk.copyTo(dest, overwrite = false)
+            Triple(dest, false, "")
+        } catch (t: Throwable) {
+            DebugLog.step("build", "local fail: ${t.message}")
+            sink("local build failed: ${t.message ?: t.javaClass.simpleName}")
+            throw t
+        }
+    }
+
+    private fun remoteBuild(
+        root: File,
+        buildUrl: String,
+        buildToken: String,
+        sink: (String) -> Unit,
+        requireRemote: Boolean,
+    ): File {
+        if (buildUrl.isBlank() || buildToken.isBlank()) {
+            val summary = "Set the remote builder URL and token on Console → Variables."
+            sink(summary)
+            error(summary)
+        }
+        DebugLog.step("build", "mode=remote")
+        sink("Sending ${root.name} to the remote builder.")
+        return CloudBuild.build(app, root, buildUrl, buildToken, sink).also {
+            if (!requireRemote) Unit
+        }
+    }
+
+    private fun agentOrTabSummary(mode: Mode, root: File, apk: File): String {
+        return if (mode == Mode.GRADLE_ONLY || mode == Mode.REMOTE_ONLY) {
+            "Agent build: ${apk.name}"
+        } else {
+            "${root.name}: ${apk.name}"
         }
     }
 

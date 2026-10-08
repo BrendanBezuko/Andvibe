@@ -88,7 +88,8 @@ Condensed from a full code audit; line references are to the current `main`.
                  └───────────────────┬───────────────────────┘
                                      │
                  ┌───────────────────▼───────────────────────┐
-                 │ net/  AiClient · CloudBuild (HTTP)        │
+                 │ net/  AiClient · CloudBuild (HTTP remote) │
+│       LocalGradleEngine · Toolchain*      │
                  │ data/ stores (files · prefs · secrets)    │
                  │ core/ pure JVM: RepoFiles · GitOps ·      │
                  │       ZipWriter · JsRunner · Understand   │

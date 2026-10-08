@@ -77,6 +77,8 @@ dependencies {
     // Kept only to one-time-migrate existing EncryptedSharedPreferences blobs.
     implementation(libs.androidx.security.crypto)
     implementation(libs.apksig)
+    implementation(libs.commons.compress)
+    implementation(libs.tukaani.xz)
     implementation(libs.spongycastle.core)
     implementation(libs.spongycastle.prov)
     implementation(libs.spongycastle.pkix)

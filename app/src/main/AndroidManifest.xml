@@ -19,6 +19,7 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="application/vnd.android.package-archive" />
         </intent>
+        <package android:name="com.example.andvibe.toolchain" />
     </queries>
 
     <application

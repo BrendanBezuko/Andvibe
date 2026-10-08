@@ -16,7 +16,7 @@ A feature rich Starting point for an Android IDE and Software engineering agent,
 
 - Cloning a repo
 - Edit it with your own local agent and llm host (your own hosted LLMs, Anthropic, Google, Openai, Openrouter compatible)
-- `gradlew` is compiled on in a docker on Cloud Run
+- `gradlew` compiles on the phone with a local toolchain (optional remote BYOC fallback)
 - Voice Kanban agent
 - Project and workspaces
 
@@ -27,8 +27,8 @@ Use each tab like this:
 3. Search - Search foss for similar projects as starting points
 4. Files - Confirm the files and make any necessary manual edits
 5. Understand - Generate a full breakdown of the current project
-6. Vibe - plan, scafold...
-7. Build - Builds in remote docker image
+6. Vibe - An agent will plan, check with you about the architecture and changes, scafold the project, Provision cloud resources, tests, vulnerbilitiscanner, permissions, and summarize the results, 
+7. Build - Local Gradle toolchain (optional remote builder)
 8. Git - versioning
 
 Console also opens Settings, which shows whether the debug log server is listening.
@@ -131,7 +131,7 @@ The phone scans the repo for function and method signatures, packs a file tree a
 
 Pick OpenAI, Anthropic, Gemini, Grok, OpenRouter, or Custom. The model and base URL start filled in and can be changed. API keys are in Settings. OpenRouter model ids include the vendor, like `anthropic/claude-sonnet-5`.
 
-Every send runs as an agent on the phone in two phases. First a short **plan** phase with read-only tools (list, read, grep, git status, git diff), at most 12 steps. Then an **execute** phase with the full tools, at most 40 steps, following that plan. The phone runs each tool on the open repo and sends results back until the model finishes. The write tools are find-and-replace edit, write, delete, the JavaScript checks and tests, and a Cloud Run build when the repo has `gradlew`. Each step shows in the chat. Send turns into Stop while the agent works; Stop takes effect after the current model call returns. If the repo has `AGENTS.md`, `CLAUDE.md`, or `.cursorrules`, the agent reads it first. The model needs tool calling.
+Every send runs as an agent on the phone in two phases. First a short **plan** phase with read-only tools (list, read, grep, git status, git diff), at most 12 steps. Then an **execute** phase with the full tools, at most 40 steps, following that plan. The phone runs each tool on the open repo and sends results back until the model finishes. The write tools are find-and-replace edit, write, delete, the JavaScript checks and tests, and a **build** tool when the repo has `gradlew` (local toolchain first; remote builder only if configured). Each step shows in the chat. Send turns into Stop while the agent works; Stop takes effect after the current model call returns. If the repo has `AGENTS.md`, `CLAUDE.md`, or `.cursorrules`, the agent reads it first. The model needs tool calling.
 
 | Provider   | Default model               | Base URL                                           |
 | ---------- | --------------------------- | -------------------------------------------------- |
@@ -149,13 +149,15 @@ On Console, type what you want and tap **Find**. AndVibe searches public reposit
 
 ## Build on the phone
 
-A project without `gradlew` is packed on the phone. **Build APK** syntax-checks and tests the JavaScript, then writes a signed APK named Built app. The path is on the Build tab, under `Android/data/com.example.andvibe/files/apk/`. The first install asks you to allow AndVibe to install unknown apps. Tap **Install** again after that.
+**Gradle (`gradlew`) projects** compile on the phone. AndVibe downloads Android platform 34 + build-tools data from Google, then fetches **OpenJDK 17 and aapt/aapt2** from Termux’s aarch64 packages, packs them into an **AndVibe Build Tools** companion APK, and prompts you to install it (Android 10+ only allows executing binaries from an APK’s `nativeLibraryDir`). Tap Build again after installing.
 
-Gradle, Java, Kotlin, Python, Rust, and Go are not compiled on the phone.
+A project **without** `gradlew` is packed on the phone. **Build APK** syntax-checks and tests the JavaScript, then writes a signed APK named Built app. The path is on the Build tab, under `Android/data/com.example.andvibe/files/apk/`. The first install asks you to allow AndVibe to install unknown apps. Tap **Install** again after that.
 
-## Hosted builds with Pro
+Set **Prefer remote builder** to `true` under Console → Variables (and a builder URL + token) to use the remote builder instead of local. There is no automatic fallback when local fails.
 
-Skip the Cloud Run setup below with AndVibe Pro. Sign in at [andvibe.org/account](https://andvibe.org/account/), subscribe, and create a build key. On the Build tab, paste the hosted builder URL shown on that page and the build key as the token. Pro allows 6 builds an hour, 15 a day, and 100 in 30 days, each up to 20 minutes.
+## Optional remote builder (BYOC)
+
+Remote builds are optional. Deploy your own builder (below), then paste the builder URL and token under Console → Variables / Secrets.
 
 ## Deploy the Cloud Run builder
 
@@ -292,7 +294,7 @@ Cloud Build is pay-per-minute and can keep a Gradle cache in a bucket. The phone
 
 Stay on Cloud Run for this phone contract. Lambda caps a request at 15 minutes and a body around 6MB. App Runner caps a request at 120 seconds and keeps at least one instance up. ECS Fargate can run the same container, and the load balancer in front of it does not scale to zero. CodeBuild is start, poll, and download, closer to Cloud Build than to one `POST`.
 
-## Use Cloud Run from the app
+## Build from the app
 
 Rebuild and install AndVibe after a client change:
 
@@ -301,19 +303,15 @@ cd <repo-path>
 ./gradlew :app:installDebug
 ```
 
-Open a project that contains `gradlew`. On the Build tab, paste `<service-url>` (`https://….run.app`, no path) and the build token, then press **Build APK**.
+Open a project that contains `gradlew` and press **Build APK**. The default path is local: SDK download + AndVibe Build Tools, then `assembleDebug` on the phone. Logs stream on the Build tab.
 
-The phone zips the project and posts it to `/build?task=assembleDebug`. Gradle lines stream to the Console and the Build log as they happen. The zip does not contain the model API key.
+To force or fall back to a remote builder, set the URL and token under Console → Variables (optionally Prefer remote builder = `true`). The phone then zips the project and posts it to `/build?task=assembleDebug`. The zip does not contain the model API key.
 
-If Gradle succeeds, the APK comes back and **Install** opens the system installer.
-
-If Gradle fails, the failure stays in the log. Tap **Revise**. That reads the log, calls the model with the key saved in Settings, writes the edited files on the phone, and commits them. Then tap **Build APK** again. Revise does nothing until a build log exists, and it asks for an API key if none is saved.
-
-Deploy the new builder and install the new app together. The response is an event stream followed by the APK bytes. An older app expects a raw APK and will not understand this service.
+If Gradle succeeds, **Install** opens the system installer. If it fails, tap **Revise** — that reads the log, calls the model with the key in Settings, and writes fixes on the phone. Then tap **Build APK** again.
 
 ## Debug logs and MCP
 
-The app keeps a step log for console, build, Cloud Run, git, vibe, import, and local APK packing. Tokens and API keys are not written there. The same lines show up in logcat:
+The app keeps a step log for console, build, git, vibe, import, and APK packing. Tokens and API keys are not written there. The same lines show up in logcat:
 
 ```bash
 adb logcat -s AndVibe

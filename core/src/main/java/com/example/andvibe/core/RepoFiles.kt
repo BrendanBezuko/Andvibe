@@ -3,10 +3,30 @@ package com.example.andvibe.core
 import java.io.File
 
 object RepoFiles {
+    /** Always skipped by name. Gradle output dirs named "build" use [skipDir] instead —
+     *  so source packages like `features/build` are still walked/zipped. */
     val SKIP_DIRS = setOf(
-        ".git", "node_modules", "build", "dist", ".gradle", ".idea", "out", "__MACOSX"
+        ".git", "node_modules", "dist", ".gradle", ".idea", "out", "__MACOSX"
+    )
+    private val GRADLE_BUILD_MARKERS = setOf(
+        "outputs", "intermediates", "tmp", "generated", "kotlin", "classes", "libs"
     )
     val JS_EXT = setOf("js", "mjs", "cjs")
+
+    /** True for dirs that walks/zips/listings should not enter. */
+    fun skipDir(dir: File): Boolean {
+        if (!dir.isDirectory) return false
+        if (dir.name in SKIP_DIRS) return true
+        if (dir.name == "build") return isGradleBuildOutput(dir)
+        return false
+    }
+
+    /** Gradle module `build/` output, not a Kotlin source package named build. */
+    fun isGradleBuildOutput(dir: File): Boolean {
+        if (!dir.isDirectory || dir.name != "build") return false
+        val kids = dir.list() ?: return false
+        return kids.any { it in GRADLE_BUILD_MARKERS }
+    }
 
     fun rel(file: File, root: File): String {
         val base = root.canonicalFile.path
@@ -102,7 +122,7 @@ object RepoFiles {
             val kids = dir.listFiles() ?: continue
             for (kid in kids.sortedBy { it.name.lowercase() }) {
                 if (kid.isDirectory) {
-                    if (kid.name !in SKIP_DIRS) stack.add(kid)
+                    if (!skipDir(kid)) stack.add(kid)
                 } else {
                     visit(kid)
                 }

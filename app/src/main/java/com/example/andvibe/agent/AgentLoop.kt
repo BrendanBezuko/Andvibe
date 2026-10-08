@@ -179,7 +179,7 @@ object AgentLoop {
         val first = result.output.lineSequence().firstOrNull().orEmpty().take(200)
         return when {
             result.error -> first
-            name in WRITES || name == "cloud_build" || name == "run_js_tests" || name == "create_project" -> first
+            name in WRITES || name == "build" || name == "cloud_build" || name == "run_js_tests" || name == "create_project" -> first
             name == "grep" && first.startsWith("no matches") -> first
             else -> null
         }
@@ -210,7 +210,7 @@ object AgentLoop {
                 request.open?.takeIf { it.isFile }?.let {
                     append("Open in the editor: ").append(RepoFiles.rel(it, root)).append('\n')
                 }
-                append("Gradle wrapper: ").append(if (File(root, "gradlew").isFile) "yes, cloud_build works" else "no").append('\n')
+                append("Gradle wrapper: ").append(if (File(root, "gradlew").isFile) "yes, build tool works" else "no").append('\n')
             }
             if (others.isNotEmpty()) {
                 append("Other repos in this workspace (reference with @name; tools cannot edit them): ")

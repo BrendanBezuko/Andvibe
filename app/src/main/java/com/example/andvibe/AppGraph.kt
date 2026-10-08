@@ -98,7 +98,12 @@ class AppGraph(app: Application) {
             DebugLog.step("console", it)
         }
 
-        buildService = BuildService(app, tasks, onBuildChanged = { shell.buildChanged() })
+        buildService = BuildService(
+            app,
+            tasks,
+            onBuildChanged = { shell.buildChanged() },
+            preferRemote = { secrets.preferRemoteBuild() },
+        )
         gitFeature = GitFeature(
             tasks = tasks,
             dispatchers = dispatchers,
@@ -127,8 +132,8 @@ class AppGraph(app: Application) {
             onFilesChanged = { shell.filesChanged() },
         )
         toolRegistry = ToolRegistry(
-            cloudBuild = { root ->
-                val result = buildService.agentCloudBuild(
+            build = { root ->
+                val result = buildService.agentBuild(
                     root,
                     secrets.buildUrl(),
                     secrets.buildToken(),

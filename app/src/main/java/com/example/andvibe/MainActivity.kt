@@ -231,6 +231,7 @@ class MainActivity : AppCompatActivity() {
         graph.understandFeature.syncBusy()
         graph.vibeFeature.syncBusy()
         graph.gitFeature.syncBusy()
+        graph.buildFeature.syncBusy()
         paintBusy()
     }
 

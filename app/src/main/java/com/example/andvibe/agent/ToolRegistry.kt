@@ -13,7 +13,7 @@ import java.io.File
  * Replaces the monolithic AgentTools dispatch. No global app state or UI listener bus.
  */
 class ToolRegistry(
-    private val cloudBuild: (root: File) -> String,
+    private val build: (root: File) -> String,
     private val includeProject: (String) -> Unit,
 ) {
     private val tools: List<RegisteredTool> = listOf(
@@ -100,10 +100,15 @@ class ToolRegistry(
             "Syntax-check every JavaScript file and run *.test.js, *.spec.js, and files under test/ on the phone. Only JavaScript runs on the phone.",
             schema()
         ) { ctx, _ -> JsRunner.compile(ctx.repo) + "\n\n" + JsRunner.test(ctx.repo) },
-        tool("cloud_build", plan = false,
-            "Compile a Gradle project on Cloud Run with assembleDebug and return the end of the build log. Takes several minutes. Only works when the repo has gradlew.",
+        tool("build", plan = false,
+            "Compile a Gradle project with assembleDebug on this phone (local toolchain) and return the end of the build log. Uses the remote builder only when Prefer remote builder is on in Variables. Takes several minutes. Only works when the repo has gradlew.",
             schema()
-        ) { ctx, _ -> cloudBuild(ctx.repo) },
+        ) { ctx, _ -> build(ctx.repo) },
+        // Alias kept so older model plans that still emit cloud_build keep working.
+        tool("cloud_build", plan = false,
+            "Same as build. Prefer the build tool.",
+            schema()
+        ) { ctx, _ -> build(ctx.repo) },
         tool("create_project", plan = false,
             "Create a new empty project folder with its own git repo, add it to the workspace, and switch to it. Every later tool call works in the new project. Only call this when the user explicitly asks for a new project, app, or repo. Never use it to start over on the current repo.",
             schema(
@@ -115,7 +120,8 @@ class ToolRegistry(
 
     private val byName = tools.associateBy { it.spec.name }
 
-    val specs: List<ToolSpec> = tools.map { it.spec }
+    /** Public tool list for the model. Aliases like cloud_build stay callable via [run]. */
+    val specs: List<ToolSpec> = tools.map { it.spec }.filter { it.name != "cloud_build" }
     val planSpecs: List<ToolSpec> = tools.filter { it.plan }.map { it.spec }
 
     fun run(name: String, args: JSONObject, ctx: AgentContext): String {
@@ -144,7 +150,7 @@ class ToolRegistry(
             "git_status" -> "git status"
             "git_diff" -> "git diff ${path}".trimEnd()
             "run_js_tests" -> "run JavaScript tests"
-            "cloud_build" -> "build on Cloud Run"
+            "build", "cloud_build" -> "build APK"
             "create_project" -> "create project ${args.optString("name")}"
             else -> name
         }
@@ -174,7 +180,7 @@ class ToolRegistry(
                 if (lines.size >= MAX_LIST) return
                 val rel = RepoFiles.rel(kid, ctx.repo)
                 if (kid.isDirectory) {
-                    if (kid.name in RepoFiles.SKIP_DIRS) continue
+                    if (RepoFiles.skipDir(kid)) continue
                     lines.add("$rel/")
                     if (level < depth) walk(kid, level + 1)
                 } else {

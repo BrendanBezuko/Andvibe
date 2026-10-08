@@ -127,7 +127,7 @@ Find on this tab searches GitHub, GitLab, and Codeberg. Tap a result and Files o
 Open an older folder from Files, or clone a public repo.
 Vibe writes files and leaves them uncommitted. Stage and commit them on the Git tab.
 The Git tab stages, commits, and pushes. Edit on Vibe, then Build.
-A project with gradlew uploads to Cloud Run, and the build log streams here. Revise on the Build tab edits the project on this phone. The API key stays on the device. Other projects pack on the phone.
+A project with gradlew builds on this phone with the local toolchain (SDK + Build Tools package). Remote BYOC is opt-in: set Prefer remote builder to true under Variables (plus URL + token). Revise on the Build tab edits the project on this phone. The API key stays on the device. Other projects pack on the phone.
 
 JavaScript can use relative require("./file") and assert.equal.
 npm, Python, Rust, and Go do not build here.

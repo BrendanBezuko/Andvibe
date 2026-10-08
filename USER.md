@@ -58,13 +58,19 @@ These were stated as corrections or emphatic decisions — treat them as constra
 ### Build
 
 - As a user, I press Build and get a signed, installable APK:
-  `gradlew` projects build on a docker image and can be host
+  `gradlew` projects compile **on the phone** with AndVibe’s own local toolchain (pinned JDK +
+  Android SDK). This is not a Termux fork — AndVibe owns the build engine. An optional remote
+  builder (BYOC) is used only when Variables → Prefer remote builder is true — never as
+  an automatic fallback.
+- First local Gradle build downloads Google SDK data, then fetches Termux OpenJDK 17 + aapt/aapt2
+  (Bionic), packs them into an AndVibe Build Tools companion APK, and prompts install
+  (executables must live in an APK’s nativeLibraryDir on Android 10+). Tap Build again after.
 - Build logs stream back live; there is a build log history per workspace.
 - The button row is: Build, then Revise (wand icon), then Install.
 - Revise sends the failing build log to my model (from the phone) and applies fixes.
 - Saved APKs are listed and installable later.
-- A security scan step checks built APKs (VirusTotal API now; MobSF-in-docker on Cloud Run is
-  on the todo list).
+- A security scan step checks built APKs (VirusTotal API now; MobSF-in-docker on a hosted
+  builder is on the todo list).
 
 ### Git
 
@@ -122,15 +128,13 @@ These were stated as corrections or emphatic decisions — treat them as constra
   verbose, step-isolated logs, check MCP status in Settings, toggle it on/off, and take
   screenshots of the app for the website.
 
-### Distribution & Pro
+### Distribution
 
 - As the maintainer, I ship to the Play Store: an `app.andvibe` application id, a Play flavor
   without the install-packages permission, MCP stripped outside debug, privacy policy + terms
   linked from the website.
-- As a Pro subscriber ($10/month via RevenueCat + Supabase, managed at andvibe.org), I paste a
-  hosted builder URL + build key and get cloud builds without deploying my own Cloud Run
-  (rate-limited: 6/hour, 15/day, 100/30 days, 20 min each). The subscription code stays in the
-  separate non-FOSS repo (`Andvibe-subscription`); this repo stays FOSS.
+- As a user, I can paste my own Cloud Run builder URL + token as an **optional remote builder**
+  when I do not want to (or cannot) use the on-device toolchain.
 
 ## Stated but not yet built (backlog)
 

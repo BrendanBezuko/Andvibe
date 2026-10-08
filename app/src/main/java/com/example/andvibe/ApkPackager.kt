@@ -147,6 +147,21 @@ object ApkPackager {
         }
     }
 
+    /** Sign an already-built APK (used for the on-device toolchain companion). */
+    fun signApk(context: Context, unsigned: File, signed: File) {
+        val (key, cert) = debugSigner(context)
+        val config = ApkSigner.SignerConfig.Builder("andvibe", KeyConfig.Jca(key), listOf(cert)).build()
+        ApkSigner.Builder(listOf(config))
+            .setInputApk(unsigned)
+            .setOutputApk(signed)
+            .setMinSdkVersion(24)
+            .setV1SigningEnabled(true)
+            .setV2SigningEnabled(true)
+            .setV3SigningEnabled(false)
+            .build()
+            .sign()
+    }
+
     private fun debugSigner(context: Context): Pair<PrivateKey, X509Certificate> {
         if (Security.getProvider("SC") == null) {
             Security.addProvider(BouncyCastleProvider())
