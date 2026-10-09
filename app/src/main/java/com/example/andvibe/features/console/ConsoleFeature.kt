@@ -1,12 +1,16 @@
 package com.example.andvibe.features.console
 
+import com.example.andvibe.CompanionCli
 import com.example.andvibe.ProjectSession
+import com.example.andvibe.SecretStore
 import com.example.andvibe.Tab
+import com.example.andvibe.ToolchainExec
 import com.example.andvibe.WorkspaceStore
 import com.example.andvibe.core.GitClient
 import com.example.andvibe.core.GitOps
 import com.example.andvibe.core.JsRunner
 import com.example.andvibe.core.RepoFiles
+import com.example.andvibe.core.ToolchainPins
 import com.example.andvibe.features.FeatureEffects
 import com.example.andvibe.tasks.AppDispatchers
 import com.example.andvibe.tasks.Res
@@ -21,6 +25,7 @@ data class ConsoleContext(
     val session: ProjectSession,
     val log: ConsoleLog,
     val appContext: android.content.Context,
+    val secrets: SecretStore,
     val onOpen: (File) -> Unit,
     val onPreview: (File) -> Unit,
     val onFilesChanged: () -> Unit,
@@ -81,8 +86,17 @@ class ConsoleFeature(
         if (trimmed.isEmpty()) return
         append("$ $trimmed")
         val parts = ConsoleCommands.tokenize(trimmed)
-        val slow = parts.getOrNull(0) == "git" && parts.getOrNull(1) in setOf("clone", "push", "pull", "fetch")
-        val label = if (slow) parts.take(2).joinToString(" ") else "Running command"
+        val slow = when (parts.getOrNull(0)) {
+            "git" -> parts.getOrNull(1) in setOf("clone", "push", "pull", "fetch")
+            "gh", "ssh" -> true
+            else -> false
+        }
+        val label = when {
+            parts.getOrNull(0) == "gh" -> "gh ${parts.getOrNull(1) ?: ""}".trim()
+            parts.getOrNull(0) == "ssh" -> "ssh"
+            slow -> parts.take(2).joinToString(" ")
+            else -> "Running command"
+        }
         _state.update { it.copy(running = true) }
         tasks.launch(label, Tab.CONSOLE, setOf(Res.CONSOLE), dispatchers.repo, track = slow) {
             try {
@@ -119,6 +133,8 @@ AndVibe
   git checkout -b <name>
   git restore <file> | init
   git remote | git remote add origin <url>
+  gh <args>                    GitHub CLI (Build Tools; PAT → GH_TOKEN)
+  ssh <args>                   OpenSSH from Build Tools (SSH key in Secrets)
   compile                      syntax-check JavaScript
   test                         run *.test.js and test/
   run [file]                   preview HTML or run JS
@@ -126,7 +142,7 @@ AndVibe
 Find on this tab searches GitHub, GitLab, and Codeberg. Tap a result and Files opens as the download starts.
 Open an older folder from Files, or clone a public repo.
 Vibe writes files and leaves them uncommitted. Stage and commit them on the Git tab.
-The Git tab stages, commits, and pushes. Edit on Vibe, then Build.
+The Git tab stages, commits, and pushes (HTTPS with PAT, or SSH with a private key). Fork is on Git → ⋯. Console gh needs Build Tools.
 A project with gradlew builds on this phone with the local toolchain (SDK + Build Tools package). Remote BYOC is opt-in: set Prefer remote builder to true under Variables (plus URL + token). Revise on the Build tab edits the project on this phone. The API key stays on the device. Other projects pack on the phone.
 
 JavaScript can use relative require("./file") and assert.equal.
@@ -148,10 +164,43 @@ HTML projects open in a preview.
             "open" -> open(args, ctx)
             "projects" -> projects(ctx)
             "git" -> git(args, ctx)
+            "gh" -> gh(args, ctx)
+            "ssh" -> ssh(args, ctx)
             "compile" -> ctx.log.append(JsRunner.compile(ctx.projectRoot()))
             "test" -> ctx.log.append(JsRunner.test(ctx.projectRoot()))
             "run" -> runFile(args.firstOrNull(), ctx)
             else -> ctx.log.append("unknown command: ${parts[0]} (try help)")
+        }
+    }
+
+    private fun gh(args: List<String>, ctx: ConsoleContext) {
+        val result = CompanionCli.runGh(
+            context = ctx.appContext,
+            secrets = ctx.secrets,
+            args = args,
+            cwd = ctx.session.cwd,
+            log = { ctx.log.append(it) },
+        )
+        if (result.code != 0) {
+            error("gh exited ${result.code}")
+        }
+    }
+
+    private fun ssh(args: List<String>, ctx: ConsoleContext) {
+        if (args.isEmpty()) error("usage: ssh <args>")
+        val native = ToolchainExec.companionNativeDir(ctx.appContext)
+            ?: error("Install AndVibe Build Tools first")
+        val sshBin = File(native, ToolchainPins.SSH_LIB)
+        if (!sshBin.isFile) error("ssh missing from Build Tools — tap Reinstall Build Tools")
+        val result = CompanionCli.run(
+            context = ctx.appContext,
+            secrets = ctx.secrets,
+            argv = listOf(sshBin.absolutePath) + args,
+            cwd = ctx.session.cwd,
+            log = { ctx.log.append(it) },
+        )
+        if (result.code != 0) {
+            error("ssh exited ${result.code}")
         }
     }
 

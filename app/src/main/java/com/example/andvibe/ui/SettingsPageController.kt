@@ -284,7 +284,7 @@ class SettingsPageController(
         secrets.saveGit(name, email, user, token, ssh)
         val origin = page.gitOrigin.text?.toString()?.trim().orEmpty()
         val note = if (origin.isEmpty()) {
-            "Saved the account."
+            "Saved git identity."
         } else {
             runCatching { GitOps.setOrigin(session.cwd, session.reposDir, origin) }
                 .getOrElse { it.message ?: "could not set origin" }

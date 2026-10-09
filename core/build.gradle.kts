@@ -15,6 +15,7 @@ kotlin {
 
 dependencies {
     api(libs.jgit)
+    api(libs.jgit.ssh)
     implementation(libs.slf4j.nop)
     api(libs.rhino)
     testImplementation(libs.junit)

@@ -87,6 +87,9 @@ object ToolchainExec {
         return JavaRuntime(javaBin, home, "companion:${ToolchainPins.COMPANION_PACKAGE}")
     }
 
+    /** True when companion ships Termux `gh` + `ssh` (may be missing on older Build Tools). */
+    fun companionCliReady(context: Context): Boolean = CompanionCli.ready(context)
+
     /** LD_PRELOAD helper that fixes OpenJDK /proc/self/exe JRE discovery. */
     fun jreHomePreload(context: Context): File? {
         val so = File(context.applicationInfo.nativeLibraryDir, "libjrehome.so")

@@ -87,10 +87,14 @@ object CompanionInstaller {
     private fun nativesCacheReady(dir: File): Boolean {
         val java = File(dir, ToolchainPins.JAVA_LIB)
         val aapt2 = File(dir, ToolchainPins.AAPT2_LIB)
+        val gh = File(dir, ToolchainPins.GH_LIB)
+        val ssh = File(dir, ToolchainPins.SSH_LIB)
         val zlib = File(dir, "libz.so")
         // Empty libz.so means tar symlinks were materialized as 0-byte files.
         return java.isFile && java.length() > 0 &&
             aapt2.isFile && aapt2.length() > 0 &&
+            gh.isFile && gh.length() > 0 &&
+            ssh.isFile && ssh.length() > 0 &&
             zlib.isFile && zlib.length() > 1_000
     }
 
@@ -117,7 +121,7 @@ object CompanionInstaller {
 
         val index = TermuxPackages.fetchIndex(abi, log)
         val pkgs = TermuxPackages.resolveClosure(index)
-        log("Resolved ${pkgs.size} Termux packages (OpenJDK 17 + aapt/aapt2 + libs)")
+        log("Resolved ${pkgs.size} Termux packages (OpenJDK 17 + aapt/aapt2 + gh/openssh + libs)")
         val debs = TermuxPackages.downloadAll(pkgs, debsDir, log)
 
         log("Extracting packages…")
@@ -193,6 +197,9 @@ object CompanionInstaller {
             }
         }
         log("Linked java/aapt2 into toolchain from companion package")
+        if (File(native, ToolchainPins.GH_LIB).isFile && File(native, ToolchainPins.SSH_LIB).isFile) {
+            CompanionCli.stageBinDir(context, native, log)
+        }
     }
 
     /**
@@ -262,6 +269,10 @@ object CompanionInstaller {
         }
         putLib(ToolchainPins.AAPT2_LIB, File(extractRoot, "bin/aapt2"))
         putLib(ToolchainPins.AAPT_LIB, File(extractRoot, "bin/aapt"))
+        putLib(ToolchainPins.GH_LIB, File(extractRoot, "bin/gh"))
+        putLib(ToolchainPins.SSH_LIB, File(extractRoot, "bin/ssh"))
+        putLib(ToolchainPins.SSH_KEYGEN_LIB, File(extractRoot, "bin/ssh-keygen"))
+        putLib(ToolchainPins.SCP_LIB, File(extractRoot, "bin/scp"))
 
         // Shared libs from dependency packages under usr/lib → extractRoot/lib
         // Include versioned sonames (libz.so.1); empty files are broken tar symlinks.
@@ -287,6 +298,8 @@ object CompanionInstaller {
 
         if (ToolchainPins.JAVA_LIB !in out) error("missing java binary from Termux openjdk")
         if (ToolchainPins.AAPT2_LIB !in out) error("missing aapt2 binary from Termux aapt2 package")
+        if (ToolchainPins.GH_LIB !in out) error("missing gh binary from Termux gh package")
+        if (ToolchainPins.SSH_LIB !in out) error("missing ssh binary from Termux openssh package")
         val zlib = out["libz.so"]
         if (zlib == null || zlib.length() < 1_000) {
             error("missing zlib (libz.so) from Termux packages — OpenJDK needs it to start")

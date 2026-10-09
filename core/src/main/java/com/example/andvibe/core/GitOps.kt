@@ -19,11 +19,23 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 object GitOps {
-    class Auth(val name: String, val email: String, val user: String, val token: String)
+    class Auth(
+        val name: String,
+        val email: String,
+        val user: String,
+        val token: String,
+        val sshKey: String = "",
+    )
 
     /** Injected by AppGraph; resolved per call so Settings edits apply immediately. */
     @Volatile
     var auth: () -> Auth = { Auth("AndVibe", "andvibe@local", "", "") }
+
+    /** HTTPS + optional SSH session factory; set from the app with Settings keys. */
+    @Volatile
+    var prepareTransport: () -> Unit = {
+        HttpTransport.setConnectionFactory(JDKHttpConnectionFactory())
+    }
 
     data class Change(
         val path: String,
@@ -425,15 +437,17 @@ object GitOps {
     }
 
     fun pull(start: File, repos: File): String = network(start, repos, "pull") { git ->
+        remoteAuthError(git)?.let { return@network it }
         val cmd = git.pull()
-        credentials()?.let { cmd.setCredentialsProvider(it) }
+        if (!originIsSsh(git)) credentials()?.let { cmd.setCredentialsProvider(it) }
         val result = cmd.call()
         if (result.isSuccessful) "pull ok" else "pull failed"
     }
 
     fun fetch(start: File, repos: File): String = network(start, repos, "fetch") { git ->
+        remoteAuthError(git)?.let { return@network it }
         val cmd = git.fetch().setRemote("origin")
-        credentials()?.let { cmd.setCredentialsProvider(it) }
+        if (!originIsSsh(git)) credentials()?.let { cmd.setCredentialsProvider(it) }
         val result = cmd.call()
         val updates = result.getTrackingRefUpdates()
         if (updates.isEmpty()) "fetch ok"
@@ -441,22 +455,25 @@ object GitOps {
     }
 
     fun push(start: File, repos: File): String {
-        if (auth().token.isBlank()) {
-            return "Add an HTTPS token in Settings. GitHub wants a personal access token."
-        }
         return network(start, repos, "push") { git ->
             val url = git.repository.config.getString("remote", "origin", "url")
             if (url.isNullOrBlank()) return@network "No origin. Set it in Settings."
-            if (url.startsWith("git@") || url.startsWith("ssh://")) {
-                return@network "This origin is SSH. Set an https:// origin in Settings. Push uses the HTTPS token."
+            val ssh = isSshUrl(url)
+            if (ssh && auth().sshKey.isBlank()) {
+                return@network "This origin is SSH. Paste your SSH private key in Settings (or Console → Secrets)."
+            }
+            if (!ssh && auth().token.isBlank()) {
+                return@network "Add a GitHub token (PAT) in Settings for HTTPS push."
             }
             val branch = git.repository.branch ?: return@network "detached HEAD"
-            val creds = credentials() ?: return@network "Add an HTTPS token in Settings."
-            val results = git.push()
+            val cmd = git.push()
                 .setRemote("origin")
                 .setRefSpecs(RefSpec("refs/heads/$branch:refs/heads/$branch"))
-                .setCredentialsProvider(creds)
-                .call()
+            if (!ssh) {
+                val creds = credentials() ?: return@network "Add a GitHub token (PAT) in Settings."
+                cmd.setCredentialsProvider(creds)
+            }
+            val results = cmd.call()
             val lines = mutableListOf<String>()
             for (result in results) {
                 for (update in result.getRemoteUpdates()) {
@@ -488,7 +505,7 @@ object GitOps {
     fun addRemote(start: File, repos: File, name: String, url: String): String {
         val remote = name.trim()
         if (remote.isEmpty() || remote.any { it.isWhitespace() }) error("bad remote name")
-        val gitUrl = GitClient.normalizeGitUrl(url)
+        val gitUrl = GitClient.normalizeRemoteUrl(url)
         val root = repo(start, repos)
         return try {
             prepare()
@@ -498,6 +515,28 @@ object GitOps {
             "added $remote $gitUrl"
         } catch (t: Throwable) {
             fail("remote", t)
+        }
+    }
+
+    fun isSshUrl(url: String): Boolean {
+        val u = url.trim()
+        return u.startsWith("git@") || u.startsWith("ssh://")
+    }
+
+    private fun originIsSsh(git: Git): Boolean {
+        val url = git.repository.config.getString("remote", "origin", "url").orEmpty()
+        return isSshUrl(url)
+    }
+
+    private fun remoteAuthError(git: Git): String? {
+        val url = git.repository.config.getString("remote", "origin", "url")
+        if (url.isNullOrBlank()) return "No origin. Set it in Settings."
+        return when {
+            isSshUrl(url) && auth().sshKey.isBlank() ->
+                "This origin is SSH. Paste your SSH private key in Settings (or Console → Secrets)."
+            !isSshUrl(url) && auth().token.isBlank() ->
+                "Add a GitHub token (PAT) in Settings for HTTPS."
+            else -> null
         }
     }
 
@@ -686,7 +725,7 @@ object GitOps {
 
     private fun prepare() {
         System.setProperty("jgit.fs.useFileAttributesCache", "false")
-        HttpTransport.setConnectionFactory(JDKHttpConnectionFactory())
+        prepareTransport()
     }
 
     private fun fail(action: String, t: Throwable): String {

@@ -39,6 +39,7 @@ object Console {
             session = activeSession,
             log = log,
             appContext = app,
+            secrets = SecretStore(app),
             onOpen = { activeShell.open(it) },
             onPreview = { activeShell.preview(it) },
             onFilesChanged = { activeShell.filesChanged() },

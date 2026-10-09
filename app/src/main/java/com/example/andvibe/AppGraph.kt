@@ -81,14 +81,7 @@ class AppGraph(app: Application) {
         BuildHistory.onBuildChanged = { shell.buildChanged() }
         ChatStore.init(app)
         PromptStore.init(app)
-        GitOps.auth = {
-            GitOps.Auth(
-                name = secrets.gitName().ifBlank { "AndVibe" },
-                email = secrets.gitEmail().ifBlank { "andvibe@local" },
-                user = secrets.gitUser(),
-                token = secrets.gitToken(),
-            )
-        }
+        GitIdentity.install(app, secrets)
         WorkspaceStore.migrate()
         session.restoreLastProject()
 
@@ -105,6 +98,7 @@ class AppGraph(app: Application) {
             preferRemote = { secrets.preferRemoteBuild() },
         )
         gitFeature = GitFeature(
+            app = app,
             tasks = tasks,
             dispatchers = dispatchers,
             session = session,
@@ -210,6 +204,7 @@ class AppGraph(app: Application) {
                     session = session,
                     log = consoleLog,
                     appContext = app,
+                    secrets = secrets,
                     onOpen = { shell.open(it) },
                     onPreview = { shell.preview(it) },
                     onFilesChanged = { shell.filesChanged() },

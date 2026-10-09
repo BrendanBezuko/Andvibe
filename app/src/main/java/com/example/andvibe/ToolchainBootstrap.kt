@@ -71,7 +71,7 @@ class ToolchainBootstrap(private val app: Context) {
             CompanionInstaller.reinstall(app, st.layout, log)
             st = status()
         } else if (!st.companionReady && promptCompanionInstall) {
-            log("Fetching OpenJDK 17 + aapt/aapt2 from Termux (Bionic builds)…")
+            log("Fetching OpenJDK 17 + aapt/aapt2 + gh/openssh from Termux (Bionic builds)…")
             CompanionInstaller.install(app, st.layout, log)
             st = status()
         } else if (st.companionReady) {

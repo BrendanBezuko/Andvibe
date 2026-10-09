@@ -70,6 +70,21 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 `:app:installDebug` is the one to use. A plain `installDebug` also installs the shell module, which is the template named Built app, not AndVibe.
 
+## Build on Termux (lifeboat)
+
+No laptop? Install [Termux](https://termux.dev) from F-Droid (not the Play Store fork), clone this repo, and run the bootstrap script. It installs OpenJDK 17 + Termux aapt2, sets up a local Android SDK, and runs `./gradlew :app:assembleDebug`.
+
+```bash
+pkg update -y
+pkg install -y git
+git clone https://github.com/BrendanBezuko/Andvibe.git
+cd Andvibe
+chmod +x termux_build.sh
+./termux_build.sh
+```
+
+The APK lands at `app/build/outputs/apk/debug/app-debug.apk`. Termux is also the escape hatch for tools AndVibe does not ship yet (`gh`, `openssh`, full shell). Prefer F-Droid Termux so `pkg` still reaches packages.termux.dev.
+
 ## Icons
 
 `scripts/make_icons.py` makes every icon from `Neon Android &vibe Logo.png`: the launcher mipmaps, the website favicon, touch icons, manifest, and social image, and the Play icon and feature graphic in `store/`. Run it again after the logo changes. The website is not in this repo. The script writes its icons to `../Andvibe-subscription/web/public`, or to `$ANDVIBE_WEB/public` when that is set, and skips them when the folder is missing.
@@ -87,7 +102,7 @@ clear                        clear the screen
 pwd    ls [path]    cd [path]
 cat <file>    open <file>
 projects                     folders already in AndVibe
-git clone <https-url> [dir]
+git clone <https-or-ssh-url> [dir]
 git status | add <file> | add .
 git commit -m "message"
 git push | pull | fetch | log
@@ -96,12 +111,14 @@ git checkout <branch>
 git checkout -b <name>
 git restore <file> | init
 git remote | git remote add origin <url>
+gh <args>                    GitHub CLI from Build Tools (PAT → GH_TOKEN)
+ssh <args>                   OpenSSH from Build Tools (SSH key in Secrets)
 compile                      syntax-check JavaScript
 test                         run *.test.js and test/
 run [file]                   preview HTML or run JS
 ```
 
-`git clone` uses HTTPS. GitHub, GitLab, Codeberg, and Bitbucket can fall back to a snapshot download if the git protocol fails on the device. SSH remotes are not supported.
+`git clone` accepts `https://` or `git@` / `ssh://`. GitHub, GitLab, Codeberg, and Bitbucket can fall back to a snapshot download if the git protocol fails on the device. Git-tab push/pull use the PAT for HTTPS remotes and the SSH private key for `git@` remotes. Git → ⋯ → **Fork on GitHub** runs Build Tools `gh` (needs the PAT).
 
 `compile` syntax-checks JavaScript. `test` runs `*.test.js`, `*.spec.js`, and files under `test/`. Tests can use `assert(cond, msg)`, `assert.equal(a, b)`, and `assert.strictEqual(a, b)`. `run` opens `index.html` or runs a `.js` file. Relative `require("./file.js")` works. npm packages, `import`/`export`, Python, Rust, and Go do not run on the phone.
 
@@ -111,11 +128,11 @@ run [file]                   preview HTML or run JS
 
 **Open** copies a folder from the phone, including `.git`. `node_modules`, `build`, and `.gradle` are skipped. The copy stops at 200MB.
 
-The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or open. Stage all, Commit, Pull, Push, Fetch, Branch, Log, and Init are on that tab.
+The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or open. Stage all, Commit, Pull, Push, Fetch, Fork, Branch, Log, and Init are on that tab.
 
-**Account** stores the git name, email, and an HTTPS token with the other secrets. GitHub wants a personal access token, not the account password.
+**Account** (Settings or Console → Secrets/Variables): git name, email, GitHub username, PAT, optional SSH private key, and this project's origin (`https://…` or `git@…`).
 
-Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a file, or Stage all, then Commit. Message asks the model for a subject and does not commit. The commit list is the history of the current branch. Name, email, HTTPS token, SSH key, and this project's origin are in Settings.
+Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a file, or Stage all, then Commit. Message asks the model for a subject and does not commit. The commit list is the history of the current branch.
 
 ## Board
 

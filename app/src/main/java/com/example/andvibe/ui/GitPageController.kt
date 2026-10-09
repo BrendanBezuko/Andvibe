@@ -400,6 +400,7 @@ class GitPageController(
             "Stage all" to { saveEditor(); feature.stageAll() },
             "Unstage all" to { saveEditor(); feature.unstageAll() },
             "Fetch" to { saveEditor(); feature.fetch() },
+            "Fork on GitHub…" to { promptFork() },
             "Checkout branch…" to { showBranches() },
             "Full log" to { saveEditor(); feature.showHistory() },
             "Initialize repository" to { saveEditor(); feature.initRepo() },
@@ -410,6 +411,25 @@ class GitPageController(
             true
         }
         menu.show()
+    }
+
+    private fun promptFork() {
+        if (feature.state.value.busy) return
+        val input = EditText(activity).apply {
+            hint = "owner/repo (blank = this origin)"
+            setSingleLine(true)
+            setText(feature.suggestedForkSlug())
+        }
+        AlertDialog.Builder(activity)
+            .setTitle("Fork on GitHub")
+            .setMessage("Uses Build Tools gh + your GitHub token. Leave blank to fork the current origin. With an SSH key saved, origin becomes git@…")
+            .setView(input)
+            .setPositiveButton("Fork") { _, _ ->
+                saveEditor()
+                feature.forkRepo(input.text?.toString().orEmpty())
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun showBranches() {

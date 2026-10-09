@@ -185,15 +185,18 @@ class ConsolePageController(
     private fun buildVault() {
         val secrets = page.secretsList
         val variables = page.variablesList
-        vaultNote(secrets, "API keys, the build token, and git credentials. They stay encrypted on this device.")
+        vaultNote(secrets, "API keys and git secrets stay encrypted on this device.")
         for (provider in Provider.entries) {
             vaultField(secrets, "${provider.id}_key", "${provider.label} API key", secret = true)
         }
         vaultField(secrets, "build_token", "Build token", secret = true)
-        vaultField(secrets, "git_token", "Git HTTPS token", secret = true)
-        vaultField(secrets, "git_ssh", "SSH private key", secret = true, lines = 4)
+        vaultField(secrets, "git_token", "GitHub token (PAT)", secret = true)
+        vaultField(secrets, "git_ssh", "SSH private key (optional)", secret = true, lines = 4)
 
-        vaultNote(variables, "Models, base URLs, optional remote builder, and git identity. Gradle builds on-device by default.")
+        vaultNote(
+            variables,
+            "Models, builder, and git identity. HTTPS remotes use the PAT; SSH remotes use the key in Secrets.",
+        )
         for (provider in Provider.entries) {
             vaultField(variables, "${provider.id}_model", "${provider.label} model", secret = false)
             vaultField(variables, "${provider.id}_base", "${provider.label} base URL", secret = false)
@@ -202,8 +205,8 @@ class ConsolePageController(
         vaultField(variables, "prefer_remote_build", "Prefer remote builder (true/false)", secret = false)
         vaultField(variables, "git_name", "Git name", secret = false)
         vaultField(variables, "git_email", "Git email", secret = false)
-        vaultField(variables, "git_user", "Git HTTPS user", secret = false)
-        vaultField(variables, "git_origin", "Remote URL", secret = false)
+        vaultField(variables, "git_user", "GitHub username", secret = false)
+        vaultField(variables, "git_origin", "Origin (https://… or git@…)", secret = false)
         loadVault()
     }
 

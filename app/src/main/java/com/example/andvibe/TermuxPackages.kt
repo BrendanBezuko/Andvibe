@@ -8,11 +8,11 @@ import java.net.URL
 
 /**
  * Resolve and download Termux main-repo .debs (Bionic aarch64 / arm).
- * Used for on-device JDK + aapt/aapt2 natives.
+ * Used for on-device JDK + aapt/aapt2 + gh/openssh natives.
  */
 object TermuxPackages {
     private const val BASE = "https://packages.termux.dev/apt/termux-main"
-    private val ROOTS = listOf("openjdk-17", "aapt2", "aapt")
+    private val ROOTS = listOf("openjdk-17", "aapt2", "aapt", "gh", "openssh")
     private val SKIP = setOf(
         "openjdk-17-x", "openjdk-17-source", "alsa-plugins", "xorgproto", "libx11",
         "libxext", "libxrender", "libxtst", "libxi",

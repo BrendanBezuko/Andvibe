@@ -3,8 +3,8 @@ package com.example.andvibe.core
 /**
  * Pinned on-device Gradle toolchain.
  * SDK platform + build-tools download from Google's repository.
- * JDK + aapt/aapt2 natives come from Termux packages, packed into a companion APK
- * (Android 10+ W^X — executables must live in nativeLibraryDir).
+ * JDK + aapt/aapt2 + gh/openssh natives come from Termux packages, packed into a
+ * companion APK (Android 10+ W^X — executables must live in nativeLibraryDir).
  */
 object ToolchainPins {
     const val VERSION = "1"
@@ -16,6 +16,12 @@ object ToolchainPins {
     const val SPAWN_WRAP_LIB = "libandvibe-spawn.so"
     const val AAPT2_LIB = "libaapt2bin.so"
     const val AAPT_LIB = "libaaptbin.so"
+    /** Termux GitHub CLI (`gh`). */
+    const val GH_LIB = "libghbin.so"
+    /** Termux OpenSSH client (`ssh`). */
+    const val SSH_LIB = "libsshbin.so"
+    const val SSH_KEYGEN_LIB = "libssh-keygenbin.so"
+    const val SCP_LIB = "libscpbin.so"
     const val COMPILE_SDK = "34"
     const val BUILD_TOOLS = "34.0.0"
     const val MIN_FREE_BYTES = 1500L * 1024 * 1024

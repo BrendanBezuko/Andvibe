@@ -10,8 +10,7 @@ import java.net.URLEncoder
 import java.util.zip.ZipInputStream
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.lib.EmptyProgressMonitor
-import org.eclipse.jgit.transport.HttpTransport
-import org.eclipse.jgit.transport.http.JDKHttpConnectionFactory
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 
 object GitClient {
     private const val MAX_ENTRY = 32L * 1024 * 1024
@@ -20,12 +19,24 @@ object GitClient {
     fun normalizeGitUrl(raw: String): String {
         val url = raw.trim()
         if (url.startsWith("git@") || url.startsWith("ssh://")) {
-            error("SSH is not supported. Use an https URL.")
+            return normalizeRemoteUrl(url)
         }
         if (!url.startsWith("https://") && !url.startsWith("http://")) {
-            error("Use an https URL.")
+            error("Use an https:// or git@ / ssh:// URL.")
         }
         return url
+    }
+
+    /** HTTPS or SSH remote URL for origin / clone. */
+    fun normalizeRemoteUrl(raw: String): String {
+        val url = raw.trim()
+        if (url.isEmpty() || url.any { it.isWhitespace() }) error("bad remote URL")
+        if (url.startsWith("git@") || url.startsWith("ssh://") ||
+            url.startsWith("https://") || url.startsWith("http://")
+        ) {
+            return url
+        }
+        error("Use https://, git@host:path, or ssh://")
     }
 
     fun safeRepoName(name: String): String {
@@ -81,6 +92,9 @@ object GitClient {
     }
 
     private fun doClone(url: String, dest: File, log: (String) -> Unit, shallow: Boolean) {
+        if (GitOps.isSshUrl(url) && GitOps.auth().sshKey.isBlank()) {
+            error("SSH clone needs an SSH private key in Settings (Console → Secrets).")
+        }
         val cmd = Git.cloneRepository()
             .setURI(url)
             .setDirectory(dest)
@@ -90,13 +104,21 @@ object GitClient {
                     if (title.isNotBlank()) log(title)
                 }
             })
+        if (!GitOps.isSshUrl(url)) {
+            val a = GitOps.auth()
+            if (a.token.isNotBlank()) {
+                cmd.setCredentialsProvider(
+                    UsernamePasswordCredentialsProvider(a.user.ifBlank { "git" }, a.token),
+                )
+            }
+        }
         if (shallow) cmd.setDepth(1)
         cmd.call().close()
     }
 
     private fun prepare() {
         System.setProperty("jgit.fs.useFileAttributesCache", "false")
-        HttpTransport.setConnectionFactory(JDKHttpConnectionFactory())
+        GitOps.prepareTransport()
     }
 
     private fun isBroken(t: Throwable): Boolean {

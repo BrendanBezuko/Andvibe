@@ -53,6 +53,23 @@ class TermuxPackagesTest {
             Filename: pool/a.deb
             Size: 1
 
+            Package: gh
+            Version: 1
+            Filename: pool/gh.deb
+            Size: 1
+
+            Package: openssh
+            Version: 1
+            Depends: openssl, zlib
+            Filename: pool/ssh.deb
+            Size: 1
+
+            Package: openssl
+            Version: 1
+            Depends: zlib
+            Filename: pool/ssl.deb
+            Size: 1
+
             Package: zlib
             Version: 1
             Filename: pool/z.deb
@@ -66,6 +83,10 @@ class TermuxPackagesTest {
         )
         val closure = TermuxPackages.resolveClosure(index)
         val names = closure.map { it.name }.toSet()
-        assertTrue(names.containsAll(listOf("openjdk-17", "aapt2", "aapt", "zlib", "fmt")))
+        assertTrue(
+            names.containsAll(
+                listOf("openjdk-17", "aapt2", "aapt", "gh", "openssh", "openssl", "zlib", "fmt"),
+            ),
+        )
     }
 }

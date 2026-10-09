@@ -1,7 +1,10 @@
 package com.example.andvibe.features.git
 
+import android.content.Context
 import com.example.andvibe.AiClient
+import com.example.andvibe.CompanionCli
 import com.example.andvibe.DebugLog
+import com.example.andvibe.GitIdentity
 import com.example.andvibe.ProjectSession
 import com.example.andvibe.PromptStore
 import com.example.andvibe.Provider
@@ -18,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 class GitFeature(
+    private val app: Context,
     private val tasks: TaskRunner,
     private val dispatchers: AppDispatchers,
     private val session: ProjectSession,
@@ -109,6 +113,55 @@ class GitFeature(
     fun push() = runGit("Push", clearDetail = true) { GitOps.push(session.cwd, session.reposDir) }
 
     fun fetch() = runGit("Fetch", clearDetail = true) { GitOps.fetch(session.cwd, session.reposDir) }
+
+    /**
+     * Fork on GitHub via Build Tools `gh`, then point origin at your fork.
+     * [repo] is `owner/name`, or blank to fork the current origin.
+     */
+    fun forkRepo(repo: String) {
+        val slug = repo.trim().removePrefix("https://github.com/").removePrefix("http://github.com/")
+            .removeSuffix(".git").trim('/')
+        runGit("Fork", clearDetail = true) {
+            if (secrets.gitToken().isBlank()) {
+                return@runGit "Add a GitHub token (PAT) in Settings — Fork uses gh with GH_TOKEN."
+            }
+            if (!CompanionCli.ready(app)) {
+                return@runGit "Install Build Tools (Build tab) for gh, then Fork again."
+            }
+            val args = if (slug.isBlank()) {
+                listOf("repo", "fork", "--remote=true")
+            } else {
+                listOf("repo", "fork", slug, "--remote=true")
+            }
+            val result = CompanionCli.runGh(
+                context = app,
+                secrets = secrets,
+                args = args,
+                cwd = session.cwd,
+                log = log,
+            )
+            if (result.code != 0) {
+                return@runGit result.output.ifBlank { "gh fork exited ${result.code}" }
+            }
+            val out = result.output.ifBlank { "forked${if (slug.isBlank()) "" else " $slug"}" }
+            // Prefer SSH origin when an SSH key is saved.
+            if (secrets.gitSsh().isNotBlank()) {
+                val origin = GitOps.originUrl(session.cwd, session.reposDir)
+                val forkedSlug = GitIdentity.githubSlug(origin).ifBlank { slug }
+                if (forkedSlug.isNotBlank() && !GitOps.isSshUrl(origin)) {
+                    val ssh = "git@github.com:$forkedSlug.git"
+                    val note = runCatching {
+                        GitOps.setOrigin(session.cwd, session.reposDir, ssh)
+                    }.getOrDefault(ssh)
+                    return@runGit "$out\n$note"
+                }
+            }
+            out
+        }
+    }
+
+    fun suggestedForkSlug(): String =
+        GitIdentity.githubSlug(GitOps.originUrl(session.cwd, session.reposDir))
 
     fun initRepo() = runGit(clearDetail = true) {
         val dir = runCatching { session.projectRoot() }.getOrElse {
