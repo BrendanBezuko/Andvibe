@@ -168,6 +168,8 @@ object CompanionInstaller {
         bin.mkdirs()
         // Wrapper injects sun.jnu.encoding for Gradle's forked daemon JVM.
         // ANDVIBE_JAVA_EXE still points here so libjrehome can fake /proc/self/exe.
+        // Other JDK CLIs (javac/jlink/jmod/…) stay as staged stubs; libjrehome
+        // rewrites them to ANDVIBE_JDK_BIN_DIR/lib<tool>bin.so at spawn time.
         symlinkReplace(File(bin, "java"), javaWrap)
         if (spawnSo.isFile) {
             File(layout.jdkHome, "lib").mkdirs()
@@ -185,6 +187,27 @@ object CompanionInstaller {
             props.writeText("android.aapt2FromMavenOverride=${aapt2So.absolutePath}\n")
         }
         log("Linked java/aapt2 into toolchain from companion package")
+    }
+
+    /**
+     * Copy companion aapt2 into [layout] as a file named `aapt2`. AGP rejects
+     * `libaapt2bin.so` paths on some devices even when the bit is executable.
+     */
+    fun stageAapt2(
+        context: Context,
+        layout: ToolchainLayout,
+        nativeDir: File?,
+        log: (String) -> Unit,
+    ): File? {
+        val src = nativeDir?.let { File(it, ToolchainPins.AAPT2_LIB) }?.takeIf { it.isFile }
+            ?: return null
+        val dest = File(layout.root, "aapt2")
+        if (!dest.isFile || dest.length() != src.length()) {
+            src.copyTo(dest, overwrite = true)
+            dest.setExecutable(true, false)
+            log("Staged aapt2 at ${dest.absolutePath}")
+        }
+        return dest
     }
 
     private fun stageJdk(extractRoot: File, layout: ToolchainLayout, log: (String) -> Unit) {

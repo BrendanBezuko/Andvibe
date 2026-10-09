@@ -46,23 +46,67 @@ static int ends_with(const char *path, const char *suffix) {
     return n >= m && strcmp(path + n - m, suffix) == 0;
 }
 
-static const char *rewrite_path(const char *path) {
-    if (path == NULL || path[0] == '\0') return path;
+static const char *env_or_null(const char *name) {
+    const char *v = getenv(name);
+    return (v != NULL && v[0] != '\0') ? v : NULL;
+}
 
-    const char *java_hint = getenv("ANDVIBE_JAVA_EXE");
-    const char *java_real = getenv("ANDVIBE_JAVA_REAL");
-    if (java_real != NULL && java_real[0] != '\0') {
-        if ((java_hint != NULL && strcmp(path, java_hint) == 0) || ends_with(path, "/bin/java")) {
+/*
+ * Map …/jdk/bin/<tool> → $ANDVIBE_JDK_BIN_DIR/lib<tool>bin.so when present.
+ * Falls back to ANDVIBE_JAVA_REAL for java. Buffer is process-static (one rewrite
+ * at a time is enough for posix_spawn/execve).
+ */
+static const char *rewrite_jdk_bin(const char *path) {
+    static char rewritten[PATH_MAX];
+
+    if (ends_with(path, "/jspawnhelper")) {
+        const char *helper = env_or_null("ANDVIBE_JSPAWNHELPER_REAL");
+        if (helper != NULL) {
+            dbg("helper", path, helper);
+            return helper;
+        }
+        return path;
+    }
+
+    const char *slash = strrchr(path, '/');
+    if (slash == NULL) return path;
+    /* require …/bin/<tool> */
+    const char *bin = strstr(path, "/bin/");
+    if (bin == NULL || bin > slash) return path;
+    if (strncmp(bin, "/bin/", 5) != 0) return path;
+    const char *tool = slash + 1;
+    if (tool[0] == '\0' || strchr(tool, '/') != NULL) return path;
+
+    if (strcmp(tool, "java") == 0) {
+        const char *java_real = env_or_null("ANDVIBE_JAVA_REAL");
+        if (java_real != NULL) {
             dbg("java", path, java_real);
             return java_real;
         }
+        return path;
     }
 
-    const char *helper_real = getenv("ANDVIBE_JSPAWNHELPER_REAL");
-    if (helper_real != NULL && helper_real[0] != '\0' && ends_with(path, "/jspawnhelper")) {
-        dbg("helper", path, helper_real);
-        return helper_real;
+    const char *dir = env_or_null("ANDVIBE_JDK_BIN_DIR");
+    if (dir == NULL) return path;
+    int n = snprintf(rewritten, sizeof(rewritten), "%s/lib%sbin.so", dir, tool);
+    if (n <= 0 || (size_t)n >= sizeof(rewritten)) return path;
+    if (access(rewritten, X_OK) != 0) return path;
+    dbg(tool, path, rewritten);
+    return rewritten;
+}
+
+static const char *rewrite_path(const char *path) {
+    if (path == NULL || path[0] == '\0') return path;
+
+    const char *java_hint = env_or_null("ANDVIBE_JAVA_EXE");
+    const char *java_real = env_or_null("ANDVIBE_JAVA_REAL");
+    if (java_real != NULL && java_hint != NULL && strcmp(path, java_hint) == 0) {
+        dbg("java-hint", path, java_real);
+        return java_real;
     }
+
+    const char *rewritten = rewrite_jdk_bin(path);
+    if (rewritten != path) return rewritten;
 
     dbg("pass", path, path);
     return path;

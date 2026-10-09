@@ -39,3 +39,6 @@ captures/
 credentials.json
 service-account*.json
 *.so
+# Prebuilt helpers shipped in the APK (built by scripts/build-*.sh).
+!app/src/main/jniLibs/**/*.so
+!app/src/main/assets/toolchain-natives/**/*.so

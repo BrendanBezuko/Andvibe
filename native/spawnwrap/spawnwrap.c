@@ -78,27 +78,39 @@ static int ends_with(const char *path, const char *suffix) {
     return n >= m && strcmp(path + n - m, suffix) == 0;
 }
 
+static const char *env_or_null(const char *name) {
+    const char *v = getenv(name);
+    return (v != NULL && v[0] != '\0') ? v : NULL;
+}
+
 static const char *rewrite_path(const char *path) {
     if (path == NULL || path[0] == '\0') return path;
 
-    const char *java_hint = getenv("ANDVIBE_JAVA_EXE");
-    const char *java_real = getenv("ANDVIBE_JAVA_REAL");
-    if (java_real != NULL && java_real[0] != '\0') {
-        if ((java_hint != NULL && strcmp(path, java_hint) == 0) || ends_with(path, "/bin/java")) {
-            char buf[256];
-            snprintf(buf, sizeof(buf), "rewrite java %s -> %s", path, java_real);
-            dbg(buf);
-            return java_real;
-        }
+    static const struct { const char *suffix; const char *env; } tools[] = {
+        { "/bin/java", "ANDVIBE_JAVA_REAL" },
+        { "/bin/jlink", "ANDVIBE_JLINK_REAL" },
+        { "/bin/javac", "ANDVIBE_JAVAC_REAL" },
+        { "/bin/jar", "ANDVIBE_JAR_REAL" },
+        { "/jspawnhelper", "ANDVIBE_JSPAWNHELPER_REAL" },
+    };
+
+    const char *java_hint = env_or_null("ANDVIBE_JAVA_EXE");
+    const char *java_real = env_or_null("ANDVIBE_JAVA_REAL");
+    if (java_real != NULL && java_hint != NULL && strcmp(path, java_hint) == 0) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "rewrite java-hint %s -> %s", path, java_real);
+        dbg(buf);
+        return java_real;
     }
 
-    /* OpenJDK posix_spawn mode execs $JAVA_HOME/lib/jspawnhelper first. */
-    const char *helper_real = getenv("ANDVIBE_JSPAWNHELPER_REAL");
-    if (helper_real != NULL && helper_real[0] != '\0' && ends_with(path, "/jspawnhelper")) {
+    for (unsigned i = 0; i < sizeof(tools) / sizeof(tools[0]); i++) {
+        if (!ends_with(path, tools[i].suffix)) continue;
+        const char *real = env_or_null(tools[i].env);
+        if (real == NULL) return path;
         char buf[256];
-        snprintf(buf, sizeof(buf), "rewrite helper %s -> %s", path, helper_real);
+        snprintf(buf, sizeof(buf), "rewrite %s %s -> %s", tools[i].suffix, path, real);
         dbg(buf);
-        return helper_real;
+        return real;
     }
 
     return path;

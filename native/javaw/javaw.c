@@ -5,6 +5,12 @@
  * org.gradle.jvmargs. Without it, Termux OpenJDK DNS fails with
  * "platform encoding not initialized". This wrapper always injects the
  * encoding flags, then execs libjavabin.so beside itself.
+ *
+ * Also drops Gradle's -javaagent:…gradle-instrumentation-agent…. On this
+ * OpenJDK build, loading ANY javaagent leaves native JNU encoding
+ * uninitialized, so InetAddress/DNS throws InternalError even when
+ * -Dsun.jnu.encoding=UTF-8 is set. Gradle then falls back to legacy
+ * classpath instrumentation (Agent.isApplied() == false).
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -78,12 +84,22 @@ int main(int argc, char **argv) {
     for (int i = 0; i < n_inject; i++) {
         new_argv[1 + i] = (char *)inject[i];
     }
+    int out = 1 + n_inject;
     for (int i = 1; i < argc; i++) {
-        new_argv[1 + n_inject + (i - 1)] = argv[i];
+        const char *a = argv[i];
+        if (a != NULL &&
+            strncmp(a, "-javaagent:", 11) == 0 &&
+            strstr(a, "gradle-instrumentation-agent") != NULL) {
+            dbg("strip");
+            dbg(a);
+            continue;
+        }
+        new_argv[out++] = argv[i];
     }
+    new_argv[out] = NULL;
     dbg(self);
     dbg(target);
-    for (int i = 0; i < new_argc && i < 12; i++) {
+    for (int i = 0; i < out && i < 12; i++) {
         char line[320];
         snprintf(line, sizeof(line), "argv[%d]=%s", i, new_argv[i] ? new_argv[i] : "(null)");
         dbg(line);

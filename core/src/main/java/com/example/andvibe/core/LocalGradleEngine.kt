@@ -104,6 +104,10 @@ object LocalGradleEngine {
         config.aapt2Override?.takeIf { it.isFile }?.let { aapt2 ->
             ensureGradleProp(root, "android.aapt2FromMavenOverride", aapt2.absolutePath)
         }
+        // Avoid Kotlin compiler daemon (forks jdk/bin/java → W^X). Prefer in-process.
+        ensureGradleProp(root, "kotlin.compiler.execution.strategy", "in-process")
+        // AGP jlink transform needs a W^X-safe jlink; skip when we rewrite via LD_PRELOAD.
+        ensureGradleProp(root, "android.experimental.disableJdkImageTransform", "true")
         // Replace project org.gradle.jvmargs so -Xmx4608m etc. cannot drop our -D flags.
         val restoreJvmArgs = replaceProjectJvmArgs(root, daemonJvmArgs, log)
         try {

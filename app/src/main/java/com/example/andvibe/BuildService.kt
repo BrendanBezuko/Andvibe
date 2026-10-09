@@ -249,7 +249,9 @@ class BuildService(
         DebugLog.step("build", "mode=local java=${java.source}")
         sink("Gradle project. Building on this phone.")
         val nativeDir = ToolchainExec.companionNativeDir(app)
-        val aapt2 = nativeDir?.let { File(it, com.example.andvibe.core.ToolchainPins.AAPT2_LIB) }
+        // AGP File.canExecute() often rejects companion …/libaapt2bin.so; stage a
+        // plain "aapt2" name under our toolchain dir (still needs LD_LIBRARY_PATH).
+        val aapt2 = CompanionInstaller.stageAapt2(app, st.layout, nativeDir, sink)
         // LD_LIBRARY_PATH must be the companion native dir (not jdk/bin).
         val libPath = nativeDir?.absolutePath ?: java.javaBin.parentFile?.absolutePath
         val javaExeHint = File(java.javaHome, "bin/java").absolutePath
@@ -263,6 +265,7 @@ class BuildService(
                 "libjrehome.so missing from the AndVibe install (needed for on-device Java). " +
                     "Reinstall AndVibe, or use a remote builder."
             )
+        val appNative = File(app.applicationInfo.nativeLibraryDir)
         val prev = System.getenv("LD_PRELOAD").orEmpty()
         val jspawn = nativeDir?.let { File(it, "libjspawnhelper.so") }
         val extra = linkedMapOf(
@@ -276,6 +279,11 @@ class BuildService(
         )
         if (jspawn != null && jspawn.isFile) {
             extra["ANDVIBE_JSPAWNHELPER_REAL"] = jspawn.absolutePath
+        }
+        // JDK CLI tools in writable jdk/bin are blocked by W^X. libjrehome rewrites
+        // …/bin/<tool> → $ANDVIBE_JDK_BIN_DIR/lib<tool>bin.so (app jniLibs).
+        if (File(appNative, "libjlinkbin.so").isFile || File(appNative, "libjmodbin.so").isFile) {
+            extra["ANDVIBE_JDK_BIN_DIR"] = appNative.absolutePath
         }
         return try {
             val result = LocalGradleEngine.build(
