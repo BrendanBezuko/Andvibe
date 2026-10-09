@@ -190,31 +190,9 @@ object CompanionInstaller {
     }
 
     /**
-     * Extract the current [ToolchainPins.JAVA_WRAP_LIB] from app assets into
-     * [layout] so builds pick up agent-stripping fixes without rebuilding the
-     * companion APK.
-     */
-    fun stageJavaWrapper(context: Context, layout: ToolchainLayout, log: (String) -> Unit): File? {
-        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: return null
-        val assetPath = "toolchain-natives/$abi/${ToolchainPins.JAVA_WRAP_LIB}"
-        val bytes = try {
-            context.assets.open(assetPath).use { it.readBytes() }
-        } catch (_: Exception) {
-            return null
-        }
-        if (bytes.isEmpty()) return null
-        val dest = File(layout.root, ToolchainPins.JAVA_WRAP_LIB)
-        if (!dest.isFile || dest.length() != bytes.size.toLong()) {
-            dest.writeBytes(bytes)
-            dest.setExecutable(true, false)
-            log("Staged ${ToolchainPins.JAVA_WRAP_LIB} (${bytes.size} bytes)")
-        }
-        return dest.takeIf { it.isFile }
-    }
-
-    /**
-     * Copy companion aapt2 into [layout] as a file named `aapt2`. AGP rejects
-     * `libaapt2bin.so` paths on some devices even when the bit is executable.
+     * AGP requires the override path's file name to be exactly `aapt2`, but
+     * PackageManager only extracts `lib*.so`. Symlink `layout/aapt2` → a
+     * nativeLibraryDir `.so` so the name matches and the inode stays W^X-safe.
      */
     fun stageAapt2(
         context: Context,
@@ -222,15 +200,24 @@ object CompanionInstaller {
         nativeDir: File?,
         log: (String) -> Unit,
     ): File? {
-        val src = nativeDir?.let { File(it, ToolchainPins.AAPT2_LIB) }?.takeIf { it.isFile }
-            ?: return null
-        val dest = File(layout.root, "aapt2")
-        if (!dest.isFile || dest.length() != src.length()) {
-            src.copyTo(dest, overwrite = true)
-            dest.setExecutable(true, false)
-            log("Staged aapt2 at ${dest.absolutePath}")
+        val appNative = File(context.applicationInfo.nativeLibraryDir)
+        val real = sequenceOf(
+            File(appNative, ToolchainPins.AAPT2_LIB),
+            nativeDir?.let { File(it, ToolchainPins.AAPT2_LIB) },
+        ).firstOrNull { it != null && it.isFile } ?: run {
+            log("aapt2 missing from app/companion native libs")
+            return null
         }
-        return dest
+        val link = File(layout.root, "aapt2")
+        try {
+            if (link.exists()) link.delete()
+            android.system.Os.symlink(real.absolutePath, link.absolutePath)
+            log("aapt2 → ${real.absolutePath}")
+            return link
+        } catch (t: Throwable) {
+            log("aapt2 symlink failed: ${t.message}")
+            return real
+        }
     }
 
     private fun stageJdk(extractRoot: File, layout: ToolchainLayout, log: (String) -> Unit) {

@@ -255,19 +255,21 @@ class BuildService(
         // LD_LIBRARY_PATH must be the companion native dir (not jdk/bin).
         val libPath = nativeDir?.absolutePath ?: java.javaBin.parentFile?.absolutePath
         val javaExeHint = File(java.javaHome, "bin/java").absolutePath
-        // Daemon forks must hit libjavaw.so (injects sun.jnu.encoding + strips
-        // Gradle's instrumentation agent). Prefer the asset-staged wrapper so
-        // fixes ship with AndVibe without reinstalling the companion APK.
-        val javaWrap = CompanionInstaller.stageJavaWrapper(app, st.layout, sink)
-            ?: nativeDir?.let { File(it, com.example.andvibe.core.ToolchainPins.JAVA_WRAP_LIB) }
-                ?.takeIf { it.isFile }
-            ?: java.javaBin
+        val appNative = File(app.applicationInfo.nativeLibraryDir)
+        // Daemon forks must hit libjavaw.so (encoding flags + strip Gradle agent).
+        // Path MUST be under an extracted nativeLibraryDir — filesDir is W^X-blocked
+        // when the app posix_spawns the Gradle daemon (shell tests can still exec it).
+        val javaWrap = sequenceOf(
+            nativeDir?.let { File(it, com.example.andvibe.core.ToolchainPins.JAVA_WRAP_LIB) },
+            File(appNative, com.example.andvibe.core.ToolchainPins.JAVA_WRAP_LIB),
+            java.javaBin,
+        ).firstOrNull { it != null && it.isFile } ?: java.javaBin
+        sink("java wrapper=${javaWrap.absolutePath}")
         val preload = ToolchainExec.jreHomePreload(app)
             ?: error(
                 "libjrehome.so missing from the AndVibe install (needed for on-device Java). " +
                     "Reinstall AndVibe, or use a remote builder."
             )
-        val appNative = File(app.applicationInfo.nativeLibraryDir)
         val prev = System.getenv("LD_PRELOAD").orEmpty()
         val jspawn = nativeDir?.let { File(it, "libjspawnhelper.so") }
         val extra = linkedMapOf(
@@ -291,7 +293,8 @@ class BuildService(
             val result = LocalGradleEngine.build(
                 root = root,
                 config = LocalGradleEngine.Config(
-                    javaBin = java.javaBin,
+                    // Client JVM also goes through javaw (agent strip + encoding).
+                    javaBin = javaWrap,
                     javaHome = java.javaHome,
                     layout = st.layout,
                     libraryPath = libPath,
