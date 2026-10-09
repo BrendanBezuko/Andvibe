@@ -181,10 +181,16 @@ object CompanionInstaller {
             val aaptSo = File(native, ToolchainPins.AAPT_LIB)
             if (aaptSo.isFile) symlinkReplace(File(layout.buildTools, "aapt"), aaptSo)
         }
-        // Force AGP to the companion aapt2 (executable native lib path).
+        // AGP override must be a path whose file name is exactly `aapt2` (not
+        // libaapt2bin.so). stageAapt2 refreshes the symlink after every app
+        // reinstall when nativeLibraryDir moves.
         if (aapt2So.isFile) {
-            val props = File(layout.root, "gradle-aapt2.properties")
-            props.writeText("android.aapt2FromMavenOverride=${aapt2So.absolutePath}\n")
+            val staged = stageAapt2(context, layout, native, log)
+            if (staged != null) {
+                File(layout.root, "gradle-aapt2.properties").writeText(
+                    "android.aapt2FromMavenOverride=${staged.absolutePath}\n",
+                )
+            }
         }
         log("Linked java/aapt2 into toolchain from companion package")
     }
@@ -193,6 +199,10 @@ object CompanionInstaller {
      * AGP requires the override path's file name to be exactly `aapt2`, but
      * PackageManager only extracts `lib*.so`. Symlink `layout/aapt2` → a
      * nativeLibraryDir `.so` so the name matches and the inode stays W^X-safe.
+     *
+     * Always rewrites the link: after AndVibe reinstall, nativeLibraryDir
+     * changes and a stale symlink looks like EEXIST / dangling → AGP then
+     * rejects a fallback `libaapt2bin.so` path.
      */
     fun stageAapt2(
         context: Context,
@@ -209,15 +219,17 @@ object CompanionInstaller {
             return null
         }
         val link = File(layout.root, "aapt2")
-        try {
-            if (link.exists()) link.delete()
-            android.system.Os.symlink(real.absolutePath, link.absolutePath)
-            log("aapt2 → ${real.absolutePath}")
-            return link
-        } catch (t: Throwable) {
-            log("aapt2 symlink failed: ${t.message}")
-            return real
+        symlinkReplace(link, real)
+        if (!link.isFile) {
+            log("aapt2 link broken after stage: ${link.absolutePath} → ${real.absolutePath}")
+            return null
         }
+        if (link.name != "aapt2") {
+            log("aapt2 override must be named aapt2, got ${link.name}")
+            return null
+        }
+        log("aapt2 → ${real.absolutePath}")
+        return link
     }
 
     private fun stageJdk(extractRoot: File, layout: ToolchainLayout, log: (String) -> Unit) {

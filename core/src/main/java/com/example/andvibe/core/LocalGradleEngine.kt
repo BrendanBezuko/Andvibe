@@ -162,6 +162,7 @@ object LocalGradleEngine {
             }
 
             val output = StringBuilder()
+            var aapt2Noise = 0
             try {
                 BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
                     while (true) {
@@ -171,12 +172,22 @@ object LocalGradleEngine {
                         }
                         val line = reader.readLine() ?: break
                         val clean = stripAnsi(line)
-                        if (clean.isNotBlank()) log(clean.take(400))
+                        if (clean.isBlank()) continue
+                        // aapt2 floods stderr with harmless "No package ID 7f" lines while
+                        // linking; mirroring each to the UI causes ANRs on device.
+                        if (isAapt2PackageIdNoise(clean)) {
+                            aapt2Noise++
+                            continue
+                        }
+                        log(clean.take(400))
                         synchronized(output) {
                             output.append(clean).append('\n')
                             if (output.length > 200_000) output.delete(0, output.length - 120_000)
                         }
                     }
+                }
+                if (aapt2Noise > 0) {
+                    log("aapt2: suppressed $aapt2Noise package-ID noise lines")
                 }
                 if (!awaitExit(proc, config.timeoutMs)) {
                     proc.destroyForcibly()
@@ -306,4 +317,8 @@ object LocalGradleEngine {
 
     private fun stripAnsi(line: String): String =
         line.replace(Regex("\u001B\\[[0-?]*[ -/]*[@-~]"), "")
+
+    /** Termux/companion aapt2 spam while resolving framework refs — not a build failure. */
+    private fun isAapt2PackageIdNoise(line: String): Boolean =
+        line.contains("No package ID 7f found for resource ID")
 }

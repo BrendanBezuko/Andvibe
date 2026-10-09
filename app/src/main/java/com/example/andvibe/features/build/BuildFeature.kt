@@ -46,10 +46,24 @@ class BuildFeature(
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
+    /** Cap UI/debug republish rate — per-line updates during Gradle ANR the main thread. */
+    private var lastLogPublishMs = 0L
+    private val logPublishMinMs = 120L
+
     private fun note(line: String, mirrorConsole: Boolean = false) {
         buildLog.append(line)
-        _state.update { it.copy(logText = buildLog.snapshot()) }
-        DebugLog.step("build", line)
+        val now = System.currentTimeMillis()
+        val flush =
+            now - lastLogPublishMs >= logPublishMinMs ||
+                line.startsWith("BUILD ") ||
+                line.startsWith("APK") ||
+                line.startsWith("> Task") ||
+                line.startsWith("Tap Install")
+        if (flush) {
+            lastLogPublishMs = now
+            _state.update { it.copy(logText = buildLog.snapshot()) }
+            DebugLog.step("build", line)
+        }
         if (mirrorConsole) consoleLog(line)
     }
 
@@ -99,7 +113,10 @@ class BuildFeature(
             } finally {
                 // Clear after the task releases Res.BUILD — syncBusy() here would see
                 // the lock still held and leave ● BUILDING stuck on the Build tab.
-                _state.update { it.copy(building = false) }
+                buildLog.flush()
+                _state.update {
+                    it.copy(building = false, logText = buildLog.snapshot())
+                }
                 onBuildChanged()
             }
         }
