@@ -8,6 +8,8 @@ import com.example.andvibe.BuildService
 import com.example.andvibe.DebugLog
 import com.example.andvibe.Provider
 import com.example.andvibe.Tab
+import com.example.andvibe.ToolchainBootstrap
+import com.example.andvibe.ToolchainExec
 import com.example.andvibe.core.RepoFiles
 import com.example.andvibe.tasks.AppDispatchers
 import com.example.andvibe.tasks.Res
@@ -97,6 +99,32 @@ class BuildFeature(
             } finally {
                 // Clear after the task releases Res.BUILD — syncBusy() here would see
                 // the lock still held and leave ● BUILDING stuck on the Build tab.
+                _state.update { it.copy(building = false) }
+                onBuildChanged()
+            }
+        }
+    }
+
+    /** Force-rebuild AndVibe Build Tools and open the system installer. */
+    fun installBuildTools() {
+        if (tasks.holds(Res.BUILD) || tasks.holds(Res.REVISE)) return
+        clearLog()
+        _state.update { it.copy(building = true) }
+        tasks.launch("Installing Build Tools", Tab.BUILD, setOf(Res.BUILD), dispatchers.repo) {
+            try {
+                note("Reinstalling AndVibe Build Tools…", mirrorConsole = true)
+                val bootstrap = ToolchainBootstrap(app)
+                bootstrap.reinstallCompanion { line -> note(line, mirrorConsole = true) }
+                val summary =
+                    "Confirm the system install prompt for AndVibe Build Tools. " +
+                        "If it says the package conflicts, uninstall the old Build Tools first, then tap Reinstall again."
+                note(summary, mirrorConsole = true)
+                TaskRunner.Done("Build Tools", summary)
+            } catch (t: Throwable) {
+                val msg = t.message ?: t.javaClass.simpleName
+                note("Build Tools install failed: $msg", mirrorConsole = true)
+                TaskRunner.Done("Build Tools failed", msg)
+            } finally {
                 _state.update { it.copy(building = false) }
                 onBuildChanged()
             }

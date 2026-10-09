@@ -22,13 +22,14 @@ class ToolchainBootstrap(private val app: Context) {
 
     fun status(): Status {
         val layout = layout()
-        if (ToolchainExec.companionInstalled(app)) {
+        val companionOk = ToolchainExec.companionHealthy(app)
+        if (companionOk) {
             CompanionInstaller.linkExecutables(app, layout) { }
         }
         val java = ToolchainExec.resolveJava(app, layout)
         return Status(
             sdkReady = layout.sdkReady(),
-            companionReady = ToolchainExec.companionInstalled(app),
+            companionReady = companionOk,
             java = java,
             layout = layout,
             freeBytes = freeBytes(app.filesDir),
@@ -58,7 +59,18 @@ class ToolchainBootstrap(private val app: Context) {
             installSdkData(st.layout, log)
             st = status()
         }
-        if (!st.companionReady && promptCompanionInstall) {
+        val installedBroken =
+            ToolchainExec.companionInstalled(app) && !ToolchainExec.companionHealthy(app)
+        if (installedBroken && promptCompanionInstall) {
+            log("Build Tools companion is outdated — rebuilding APK…")
+            val nativeZlib = ToolchainExec.companionNativeDir(app)?.let { File(it, "libz.so") }
+            // Only wipe the Termux natives cache when zlib itself was empty/missing.
+            if (nativeZlib == null || !nativeZlib.isFile || nativeZlib.length() <= 1_000) {
+                File(st.layout.root, "natives").deleteRecursively()
+            }
+            CompanionInstaller.reinstall(app, st.layout, log)
+            st = status()
+        } else if (!st.companionReady && promptCompanionInstall) {
             log("Fetching OpenJDK 17 + aapt/aapt2 from Termux (Bionic builds)…")
             CompanionInstaller.install(app, st.layout, log)
             st = status()
@@ -67,6 +79,20 @@ class ToolchainBootstrap(private val app: Context) {
             st = status()
         }
         return st
+    }
+
+    /** Rebuild the companion APK and open the installer again (Build Tools button). */
+    fun reinstallCompanion(log: (String) -> Unit): Status {
+        var st = status()
+        if (!st.sdkReady) {
+            log("Downloading Android SDK ${ToolchainPins.COMPILE_SDK} + build-tools ${ToolchainPins.BUILD_TOOLS}…")
+            installSdkData(st.layout, log)
+            st = status()
+        }
+        log("Rebuilding AndVibe Build Tools…")
+        // Reuse debs/natives caches; pack a fresh companion APK and prompt install.
+        CompanionInstaller.reinstall(app, st.layout, log)
+        return status()
     }
 
     private fun installSdkData(layout: ToolchainLayout, log: (String) -> Unit) {

@@ -38,3 +38,4 @@ captures/
 *.key
 credentials.json
 service-account*.json
+*.so

@@ -12,7 +12,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.FileProvider
 import com.example.andvibe.tasks.TaskRunner
 import java.io.File
 
@@ -115,21 +114,11 @@ object Notify {
         )
     }
 
-    private fun install(context: Context, apk: File, requestCode: Int): PendingIntent? {
-        val uri = try {
-            FileProvider.getUriForFile(context, "${context.packageName}.files", apk)
-        } catch (_: IllegalArgumentException) {
-            return null
-        }
-        val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        return PendingIntent.getActivity(
-            context,
-            requestCode + 500_000,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+    private fun install(context: Context, @Suppress("UNUSED_PARAMETER") apk: File, requestCode: Int): PendingIntent? {
+        // Open MainActivity on the Build tab; the user taps Install there.
+        // PackageInstaller sessions need a live process context and cannot be
+        // reliably started from an immutable notification PendingIntent alone.
+        return open(context, Tab.BUILD, requestCode + 500_000)
     }
 
     private fun icon(tab: Tab?): Int = when (tab) {

@@ -1,20 +1,17 @@
 package com.example.andvibe.ui
 
-import android.content.Intent
 import android.graphics.Typeface
-import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.andvibe.ApkInstaller
 import com.example.andvibe.ApkLibrary
 import com.example.andvibe.BuildHistory
 import com.example.andvibe.BusyUi
@@ -66,6 +63,10 @@ class BuildPageController(
             onBeforeBuildAction()
             saveProvider()
             feature.revise(providerCreds(currentProvider()))
+        }
+        page.installBuildTools.setOnClickListener {
+            onBeforeBuildAction()
+            feature.installBuildTools()
         }
         page.installApk.setOnClickListener {
             val path = feature.state.value.lastApkPath
@@ -145,6 +146,7 @@ class BuildPageController(
         page.installApk.isEnabled = apkReady
         BusyUi.setEnabled(page.installApk, apkReady && !busy)
         BusyUi.setEnabled(page.buildApk, !busy)
+        BusyUi.setEnabled(page.installBuildTools, !busy)
         BusyUi.setEnabled(page.reviseBuild, !busy && state.logText.isNotBlank())
         paintBusy()
         if (nearBottom && state.logText.isNotBlank()) {
@@ -265,27 +267,8 @@ class BuildPageController(
             feature.appendUserMessage("APK is missing. Press Build APK again.")
             return
         }
-        if (Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
-            feature.appendUserMessage("Allow AndVibe to install apps, then tap Install again.")
-            activity.startActivity(
-                Intent(
-                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    Uri.parse("package:${activity.packageName}"),
-                ),
-            )
-            return
-        }
-        val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.files", file)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        try {
-            activity.startActivity(intent)
-        } catch (t: Throwable) {
-            feature.appendUserMessage("install failed: ${t.message ?: t.javaClass.simpleName}")
-        }
+        val err = ApkInstaller.install(activity, file, label = file.name)
+        if (err != null) feature.appendUserMessage(err)
     }
 
     private fun dp(value: Int): Int = (value * activity.resources.displayMetrics.density).toInt()

@@ -10,6 +10,10 @@ object ToolchainPins {
     const val VERSION = "1"
     const val COMPANION_PACKAGE = "com.example.andvibe.toolchain"
     const val JAVA_LIB = "libjavabin.so"
+    /** Wrapper that injects -Dsun.jnu.encoding before exec'ing [JAVA_LIB]. */
+    const val JAVA_WRAP_LIB = "libjavaw.so"
+    /** Interposes posix_spawn so ProcessBuilder can exec companion java (W^X). */
+    const val SPAWN_WRAP_LIB = "libandvibe-spawn.so"
     const val AAPT2_LIB = "libaapt2bin.so"
     const val AAPT_LIB = "libaaptbin.so"
     const val COMPILE_SDK = "34"

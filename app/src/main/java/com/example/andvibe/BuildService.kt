@@ -235,6 +235,8 @@ class BuildService(
                     "SDK data is missing. Tap Build again after the download finishes."
                 !ToolchainExec.companionInstalled(app) ->
                     "Install AndVibe Build Tools when prompted, then tap Build again."
+                !ToolchainExec.companionHealthy(app) ->
+                    "AndVibe Build Tools needs a rebuild. Tap Build again to reinstall."
                 else ->
                     "Local Java runtime not found. Install AndVibe Build Tools."
             }
@@ -248,6 +250,33 @@ class BuildService(
         sink("Gradle project. Building on this phone.")
         val nativeDir = ToolchainExec.companionNativeDir(app)
         val aapt2 = nativeDir?.let { File(it, com.example.andvibe.core.ToolchainPins.AAPT2_LIB) }
+        // LD_LIBRARY_PATH must be the companion native dir (not jdk/bin).
+        val libPath = nativeDir?.absolutePath ?: java.javaBin.parentFile?.absolutePath
+        val javaExeHint = File(java.javaHome, "bin/java").absolutePath
+        // Daemon forks must hit libjavaw.so (injects sun.jnu.encoding). Never point
+        // ANDVIBE_JAVA_REAL at bare libjavabin.so or Gradle strips encoding and DNS fails.
+        val javaWrap = nativeDir?.let { File(it, com.example.andvibe.core.ToolchainPins.JAVA_WRAP_LIB) }
+            ?.takeIf { it.isFile }
+            ?: java.javaBin
+        val preload = ToolchainExec.jreHomePreload(app)
+            ?: error(
+                "libjrehome.so missing from the AndVibe install (needed for on-device Java). " +
+                    "Reinstall AndVibe, or use a remote builder."
+            )
+        val prev = System.getenv("LD_PRELOAD").orEmpty()
+        val jspawn = nativeDir?.let { File(it, "libjspawnhelper.so") }
+        val extra = linkedMapOf(
+            // Symlink path for JRE discovery (/proc/self/exe).
+            "ANDVIBE_JAVA_EXE" to javaExeHint,
+            // Encoding wrapper — posix_spawn rewrite target for …/jdk/bin/java.
+            "ANDVIBE_JAVA_REAL" to javaWrap.absolutePath,
+            "LD_PRELOAD" to
+                if (prev.isBlank()) preload.absolutePath else preload.absolutePath + ":" + prev,
+            "ANDVIBE_JAVAW_LOG" to File(app.filesDir, "javaw.log").absolutePath,
+        )
+        if (jspawn != null && jspawn.isFile) {
+            extra["ANDVIBE_JSPAWNHELPER_REAL"] = jspawn.absolutePath
+        }
         return try {
             val result = LocalGradleEngine.build(
                 root = root,
@@ -255,8 +284,9 @@ class BuildService(
                     javaBin = java.javaBin,
                     javaHome = java.javaHome,
                     layout = st.layout,
-                    libraryPath = java.javaBin.parentFile?.absolutePath,
+                    libraryPath = libPath,
                     aapt2Override = aapt2,
+                    extraEnv = extra,
                 ),
                 log = sink,
                 cancelled = { Thread.currentThread().isInterrupted },
