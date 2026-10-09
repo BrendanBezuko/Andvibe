@@ -38,6 +38,10 @@ android {
         unitTests.isReturnDefaultValues = true
     }
     packaging {
+        // Extract jniLibs to nativeLibraryDir so LD_PRELOAD (libjrehome.so) has a path.
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources {
             excludes += setOf(
                 "META-INF/DEPENDENCIES",

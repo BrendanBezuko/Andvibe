@@ -3,6 +3,7 @@ package com.example.andvibe
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import com.example.andvibe.core.ElfNeeded
 import com.example.andvibe.core.ToolchainLayout
 import com.example.andvibe.core.ToolchainPins
 import java.io.File
@@ -37,11 +38,46 @@ object ToolchainExec {
     fun companionInstalled(context: Context): Boolean =
         companionNativeDir(context) != null
 
+    /**
+     * True when the companion APK has a real zlib. A 0-byte `libz.so` means the
+     * Build Tools package was built from broken tar-symlink extraction.
+     */
+    fun companionHealthy(context: Context): Boolean {
+        val dir = companionNativeDir(context) ?: return false
+        val javaBin = File(dir, ToolchainPins.JAVA_LIB)
+        val zlib = File(dir, "libz.so")
+        if (!javaBin.isFile || javaBin.length() == 0L) return false
+        if (!zlib.isFile || zlib.length() <= 1_000) return false
+        // Older companions shipped real libz.so but left libjli needing libz.so.1
+        // (Android will not extract versioned sonames from the APK).
+        val jli = File(dir, "libjli.so")
+        if (jli.isFile) {
+            val needed = ElfNeeded.listNeeded(jli.readBytes())
+            if (needed.any { it.contains(".so.") }) return false
+        }
+        // Flattened filename with versioned DT_SONAME breaks aapt2 (libpng → libz).
+        val soname = ElfNeeded.listSoname(zlib.readBytes())
+        if (soname != null && soname.contains(".so.")) return false
+        // Hyphenated / plus Termux deps were dropped by an over-strict lib name filter.
+        if (!File(dir, "libandroid-spawn.so").isFile ||
+            !File(dir, "libandroid-shmem.so").isFile ||
+            !File(dir, "libcxx_shared.so").isFile
+        ) {
+            return false
+        }
+        // Encoding + spawn wrappers required for Gradle's forked daemon on Android.
+        if (!File(dir, ToolchainPins.JAVA_WRAP_LIB).isFile) return false
+        if (!File(dir, ToolchainPins.SPAWN_WRAP_LIB).isFile) return false
+        return true
+    }
+
     fun companionJava(context: Context): JavaRuntime? {
         val dir = companionNativeDir(context) ?: return null
-        val javaBin = File(dir, ToolchainPins.JAVA_LIB)
+        if (!companionHealthy(context)) return null
+        // Prefer the encoding wrapper; Gradle daemons strip -Dsun.jnu.encoding.
+        val wrapped = File(dir, ToolchainPins.JAVA_WRAP_LIB)
+        val javaBin = if (wrapped.isFile) wrapped else File(dir, ToolchainPins.JAVA_LIB)
         if (!javaBin.isFile) return null
-        // Prefer the staged Termux JDK tree (modules/conf); fall back to a stub home.
         val staged = File(context.filesDir, "toolchain/v${ToolchainPins.VERSION}/jdk")
         val home = if (File(staged, "lib/modules").isFile || File(staged, "lib").isDirectory) {
             staged
@@ -49,6 +85,12 @@ object ToolchainExec {
             File(context.filesDir, "toolchain/v${ToolchainPins.VERSION}/jdk-stub").also { it.mkdirs() }
         }
         return JavaRuntime(javaBin, home, "companion:${ToolchainPins.COMPANION_PACKAGE}")
+    }
+
+    /** LD_PRELOAD helper that fixes OpenJDK /proc/self/exe JRE discovery. */
+    fun jreHomePreload(context: Context): File? {
+        val so = File(context.applicationInfo.nativeLibraryDir, "libjrehome.so")
+        return so.takeIf { it.isFile }
     }
 
     fun companionNativeDir(context: Context): File? {

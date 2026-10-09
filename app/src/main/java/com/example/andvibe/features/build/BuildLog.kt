@@ -15,23 +15,37 @@ class BuildLog(
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision.asStateFlow()
 
+    private var lastPublishMs = 0L
+    private val publishMinMs = 120L
+
     @Synchronized
     fun append(line: String): String {
         val stripped = buffer.append(line)
-        publish()
+        val now = System.currentTimeMillis()
+        if (now - lastPublishMs >= publishMinMs) {
+            lastPublishMs = now
+            publish()
+        }
         return stripped
+    }
+
+    /** Push any buffered lines to collectors (call after a burst ends). */
+    @Synchronized
+    fun flush() {
+        lastPublishMs = System.currentTimeMillis()
+        publish()
     }
 
     @Synchronized
     fun replace(content: String) {
         buffer.replace(content)
-        publish()
+        flush()
     }
 
     @Synchronized
     fun clear() {
         buffer.clear()
-        publish()
+        flush()
     }
 
     @Synchronized
