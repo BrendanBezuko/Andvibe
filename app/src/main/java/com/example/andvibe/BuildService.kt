@@ -255,10 +255,12 @@ class BuildService(
         // LD_LIBRARY_PATH must be the companion native dir (not jdk/bin).
         val libPath = nativeDir?.absolutePath ?: java.javaBin.parentFile?.absolutePath
         val javaExeHint = File(java.javaHome, "bin/java").absolutePath
-        // Daemon forks must hit libjavaw.so (injects sun.jnu.encoding). Never point
-        // ANDVIBE_JAVA_REAL at bare libjavabin.so or Gradle strips encoding and DNS fails.
-        val javaWrap = nativeDir?.let { File(it, com.example.andvibe.core.ToolchainPins.JAVA_WRAP_LIB) }
-            ?.takeIf { it.isFile }
+        // Daemon forks must hit libjavaw.so (injects sun.jnu.encoding + strips
+        // Gradle's instrumentation agent). Prefer the asset-staged wrapper so
+        // fixes ship with AndVibe without reinstalling the companion APK.
+        val javaWrap = CompanionInstaller.stageJavaWrapper(app, st.layout, sink)
+            ?: nativeDir?.let { File(it, com.example.andvibe.core.ToolchainPins.JAVA_WRAP_LIB) }
+                ?.takeIf { it.isFile }
             ?: java.javaBin
         val preload = ToolchainExec.jreHomePreload(app)
             ?: error(

@@ -190,6 +190,29 @@ object CompanionInstaller {
     }
 
     /**
+     * Extract the current [ToolchainPins.JAVA_WRAP_LIB] from app assets into
+     * [layout] so builds pick up agent-stripping fixes without rebuilding the
+     * companion APK.
+     */
+    fun stageJavaWrapper(context: Context, layout: ToolchainLayout, log: (String) -> Unit): File? {
+        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: return null
+        val assetPath = "toolchain-natives/$abi/${ToolchainPins.JAVA_WRAP_LIB}"
+        val bytes = try {
+            context.assets.open(assetPath).use { it.readBytes() }
+        } catch (_: Exception) {
+            return null
+        }
+        if (bytes.isEmpty()) return null
+        val dest = File(layout.root, ToolchainPins.JAVA_WRAP_LIB)
+        if (!dest.isFile || dest.length() != bytes.size.toLong()) {
+            dest.writeBytes(bytes)
+            dest.setExecutable(true, false)
+            log("Staged ${ToolchainPins.JAVA_WRAP_LIB} (${bytes.size} bytes)")
+        }
+        return dest.takeIf { it.isFile }
+    }
+
+    /**
      * Copy companion aapt2 into [layout] as a file named `aapt2`. AGP rejects
      * `libaapt2bin.so` paths on some devices even when the bit is executable.
      */
