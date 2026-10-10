@@ -104,9 +104,15 @@ class GitFeature(
 
     fun discard(path: String) = runGit(clearDetail = true) { GitOps.discard(session.cwd, session.reposDir, path) }
 
+    fun discardAll() = runGit(clearDetail = true) { GitOps.discardAll(session.cwd, session.reposDir) }
+
     fun stageAll() = runGit(clearDetail = true) { GitOps.stageAll(session.cwd, session.reposDir) }
 
     fun unstageAll() = runGit(clearDetail = true) { GitOps.unstageAll(session.cwd, session.reposDir) }
+
+    fun setOrigin(url: String) = runGit("Origin", clearDetail = true) {
+        GitOps.setOrigin(session.cwd, session.reposDir, url.trim())
+    }
 
     fun pull() = runGit("Pull", clearDetail = true) { GitOps.pull(session.cwd, session.reposDir) }
 

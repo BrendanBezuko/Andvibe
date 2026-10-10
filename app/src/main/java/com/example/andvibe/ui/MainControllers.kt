@@ -108,7 +108,6 @@ class MainControllers(
             page = binding.settingsPage,
             feature = graph.settingsFeature,
             secrets = store,
-            session = graph.session,
             openSettingsButton = binding.consolePage.openSettings,
             color = { activity.getColor(it) },
             dp = { dp(it) },
@@ -117,8 +116,6 @@ class MainControllers(
             closeWorkspaceIfOpen = { if (::workspace.isInitialized) workspace.close() },
             syncBack = syncBack,
             log = logLine,
-            currentTab = currentTab,
-            refreshGitIfVisible = { graph.gitFeature.refresh() },
             syncVaultKey = { provider, key ->
                 if (::console.isInitialized) console.setVaultKey(provider, key)
             },
@@ -184,8 +181,6 @@ class MainControllers(
             session = graph.session,
             store = store,
             lifecycleOwner = activity,
-            scope = graph.scope,
-            repoDispatcher = graph.dispatchers.repo,
             color = { activity.getColor(it) },
             dp = { dp(it) },
             currentProvider = { vibe.currentProvider() },
@@ -198,7 +193,7 @@ class MainControllers(
                     binding.settingsPage.gitSsh.setText(ssh)
                 }
             },
-            onVariablesSynced = { _, model, base, gitName, gitEmail, gitUser, origin ->
+            onVariablesSynced = { _, model, base, gitName, gitEmail, gitUser ->
                 binding.vibePage.model.setText(model)
                 binding.vibePage.baseUrl.setText(base)
                 if (::settings.isInitialized) {
@@ -206,20 +201,17 @@ class MainControllers(
                         name = gitName,
                         email = gitEmail,
                         user = gitUser,
-                        origin = origin,
                     )
                 } else {
                     binding.settingsPage.gitName.setText(gitName)
                     binding.settingsPage.gitEmail.setText(gitEmail)
                     binding.settingsPage.gitHttpsUser.setText(gitUser)
-                    binding.settingsPage.gitOrigin.setText(origin)
                 }
             },
             syncApiKeyField = { provider, key ->
                 if (::settings.isInitialized) settings.setApiKeyField(provider, key)
             },
             paintBusy = paintBusy,
-            runOnUi = { block -> activity.runOnUiThread(block) },
         )
         console.start()
     }

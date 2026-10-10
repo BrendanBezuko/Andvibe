@@ -13,26 +13,22 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.example.andvibe.DebugMcp
 import com.example.andvibe.Notify
-import com.example.andvibe.ProjectSession
 import com.example.andvibe.PromptStore
 import com.example.andvibe.Provider
 import com.example.andvibe.R
 import com.example.andvibe.SecretStore
-import com.example.andvibe.Tab
-import com.example.andvibe.core.GitOps
 import com.example.andvibe.databinding.PageSettingsBinding
 import com.example.andvibe.features.settings.SettingsFeature
 
 /**
- * Settings overlay: MCP, background permissions, API keys, prompts, and git credentials.
- * Permission launchers stay in the Activity and are passed in as [requestBackground].
+ * Settings overlay: MCP, background permissions, API keys, prompts, and global git identity.
+ * Per-project origin lives on the Git tab.
  */
 class SettingsPageController(
     private val activity: AppCompatActivity,
     private val page: PageSettingsBinding,
     private val feature: SettingsFeature,
     private val secrets: SecretStore,
-    private val session: ProjectSession,
     private val openSettingsButton: View,
     private val color: (Int) -> Int,
     private val dp: (Int) -> Int,
@@ -41,8 +37,6 @@ class SettingsPageController(
     private val closeWorkspaceIfOpen: () -> Unit,
     private val syncBack: () -> Unit,
     private val log: (String) -> Unit,
-    private val currentTab: () -> Tab,
-    private val refreshGitIfVisible: () -> Unit,
     private val syncVaultKey: (Provider, String) -> Unit,
 ) {
     private val apiKeys = linkedMapOf<Provider, EditText>()
@@ -135,19 +129,38 @@ class SettingsPageController(
         apiKeys[provider]?.setText(key)
     }
 
-    fun setGitFields(name: String? = null, email: String? = null, user: String? = null, token: String? = null, ssh: String? = null, origin: String? = null) {
+    fun setGitFields(
+        name: String? = null,
+        email: String? = null,
+        user: String? = null,
+        token: String? = null,
+        ssh: String? = null,
+    ) {
         name?.let { page.gitName.setText(it) }
         email?.let { page.gitEmail.setText(it) }
         user?.let { page.gitHttpsUser.setText(it) }
         token?.let { page.gitHttpsToken.setText(it) }
         ssh?.let { page.gitSsh.setText(it) }
-        origin?.let { page.gitOrigin.setText(it) }
     }
 
     private fun buildApiKeyFields() {
         val parent = page.apiKeyList
         if (parent.childCount > 0) return
         for (provider in Provider.entries) {
+            val key = "${provider.id}_key"
+            val label = TextView(activity).apply {
+                text = key
+                setTextColor(color(R.color.muted))
+                textSize = 12f
+                typeface = Typeface.MONOSPACE
+            }
+            val labelParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+            labelParams.topMargin = dp(12)
+            parent.addView(label, labelParams)
+
             val field = EditText(activity).apply {
                 hint = "${provider.label} API key"
                 setHintTextColor(color(R.color.muted))
@@ -165,7 +178,7 @@ class SettingsPageController(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             )
-            params.topMargin = dp(8)
+            params.topMargin = dp(4)
             parent.addView(field, params)
         }
     }
@@ -274,9 +287,6 @@ class SettingsPageController(
         page.gitHttpsUser.setText(secrets.gitUser())
         page.gitHttpsToken.setText(secrets.gitToken())
         page.gitSsh.setText(secrets.gitSsh())
-        page.gitOrigin.setText(
-            runCatching { GitOps.originUrl(session.cwd, session.reposDir) }.getOrDefault(""),
-        )
         page.gitSettingsNote.text = ""
     }
 
@@ -287,16 +297,9 @@ class SettingsPageController(
         val token = page.gitHttpsToken.text?.toString().orEmpty()
         val ssh = page.gitSsh.text?.toString().orEmpty()
         secrets.saveGit(name, email, user, token, ssh)
-        val origin = page.gitOrigin.text?.toString()?.trim().orEmpty()
-        val note = if (origin.isEmpty()) {
-            "Saved git identity."
-        } else {
-            runCatching { GitOps.setOrigin(session.cwd, session.reposDir, origin) }
-                .getOrElse { it.message ?: "could not set origin" }
-        }
+        val note = "Saved git identity."
         page.gitSettingsNote.text = note
         log(note)
-        if (currentTab() == Tab.GIT) refreshGitIfVisible()
     }
 
     companion object {

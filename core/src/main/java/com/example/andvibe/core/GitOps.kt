@@ -236,6 +236,30 @@ object GitOps {
         }
     }
 
+    /** Hard-reset tracked files and delete untracked files/dirs. */
+    fun discardAll(start: File, repos: File): String {
+        val root = repo(start, repos)
+        return try {
+            prepare()
+            Git.open(root).use { git ->
+                val status = git.status().call()
+                val dirty = !status.isClean ||
+                    status.untracked.isNotEmpty() ||
+                    status.untrackedFolders.isNotEmpty()
+                if (!dirty) return@use "nothing to discard"
+                if (git.repository.resolve("HEAD") != null) {
+                    git.reset().setMode(ResetType.HARD).call()
+                } else {
+                    runCatching { git.reset().setMode(ResetType.MIXED).call() }
+                }
+                git.clean().setCleanDirectories(true).setForce(true).call()
+                "discarded all changes"
+            }
+        } catch (t: Throwable) {
+            fail("discard", t)
+        }
+    }
+
     fun commit(start: File, repos: File, message: String): String {
         val text = message.trim()
         if (text.isEmpty()) return "Write a commit message."

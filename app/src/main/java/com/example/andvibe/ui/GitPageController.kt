@@ -72,9 +72,11 @@ class GitPageController(
             }
         })
         page.gitRefresh.setOnClickListener { feature.refreshWithDetailClear() }
+        page.gitDiscardAll.setOnClickListener { confirmDiscardAll() }
         page.gitPull.setOnClickListener { feature.pull() }
         page.gitPush.setOnClickListener { feature.push() }
         page.gitBranch.setOnClickListener { showBranches() }
+        page.gitSummary.setOnClickListener { promptSetOrigin() }
         page.gitMore.setOnClickListener { showGitMenu(it) }
         page.gitCommit.setOnClickListener {
             val message = page.gitMessage.text?.toString()?.trim().orEmpty()
@@ -218,7 +220,7 @@ class GitPageController(
             state.busy -> "Working…"
             snap == null -> "Open a project, then refresh."
             !snap.isRepo -> snap.summary
-            else -> snap.remote.ifBlank { "No remote" }
+            else -> snap.remote.ifBlank { "No remote · tap to set origin" }
         }
         val staged = snap?.changes?.count { it.staged } ?: 0
         page.gitMessage.hint = if (snap?.isRepo == true && snap.branch.isNotBlank()) {
@@ -256,8 +258,13 @@ class GitPageController(
             BusyUi.setEnabled(button, enabled)
         }
         BusyUi.setEnabled(page.gitBranch, enabled)
+        BusyUi.setEnabled(page.gitSummary, enabled && snap?.isRepo == true)
         BusyUi.setEnabled(page.gitCommit, enabled)
         BusyUi.setEnabled(page.gitSuggest, enabled && snap?.isRepo == true && snap.changes.isNotEmpty())
+        BusyUi.setEnabled(
+            page.gitDiscardAll,
+            enabled && snap?.isRepo == true && snap.changes.isNotEmpty(),
+        )
         BusyUi.setEnabled(page.createRelease, enabled)
         BusyUi.setEnabled(page.releaseName, enabled)
         BusyUi.setEnabled(page.releaseNotes, enabled)
@@ -400,6 +407,8 @@ class GitPageController(
         val actions = listOf(
             "Stage all" to { saveEditor(); feature.stageAll() },
             "Unstage all" to { saveEditor(); feature.unstageAll() },
+            "Discard all changes…" to { confirmDiscardAll() },
+            "Set origin…" to { promptSetOrigin() },
             "Fetch" to { saveEditor(); feature.fetch() },
             "Fork on GitHub…" to { promptFork() },
             "Create pull request…" to { promptCreatePullRequest() },
@@ -546,6 +555,45 @@ class GitPageController(
             .setPositiveButton("Discard") { _, _ ->
                 saveEditor()
                 feature.discard(change.path)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun confirmDiscardAll() {
+        if (feature.state.value.busy) return
+        val count = feature.state.value.snapshot?.changes?.size ?: 0
+        if (count == 0) {
+            page.gitSummary.text = "Nothing to discard."
+            return
+        }
+        AlertDialog.Builder(activity)
+            .setTitle("Discard all changes")
+            .setMessage("Throw away $count changed path(s)? Tracked files reset to HEAD; untracked files are deleted.")
+            .setPositiveButton("Discard all") { _, _ ->
+                saveEditor()
+                feature.discardAll()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun promptSetOrigin() {
+        if (feature.state.value.busy) return
+        if (feature.state.value.snapshot?.isRepo != true) return
+        val current = feature.state.value.snapshot?.remote.orEmpty()
+        val input = EditText(activity).apply {
+            hint = "https://… or git@…"
+            setSingleLine(true)
+            setText(current)
+        }
+        AlertDialog.Builder(activity)
+            .setTitle("Origin")
+            .setMessage("Remote URL for this project only. Global git identity is in Settings.")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                saveEditor()
+                feature.setOrigin(input.text?.toString().orEmpty())
             }
             .setNegativeButton("Cancel", null)
             .show()

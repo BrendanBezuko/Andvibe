@@ -128,9 +128,9 @@ run [file]                   preview HTML or run JS
 
 **Open** copies a folder from the phone, including `.git`. `node_modules`, `build`, and `.gradle` are skipped. The copy stops at 200MB.
 
-The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or open. Stage all, Commit, Pull, Push, Fetch, Fork, Create PR, Branch, Log, and Init are on that tab.
+The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or open. Stage all, Discard all, Commit, Pull, Push, Fetch, Fork, Create PR, Branch, Log, and Init are on that tab. Tap the remote line (or ⋯ → Set origin) for this project's origin URL.
 
-**Account** (Settings or Console → Secrets/Variables): git name, email, GitHub username, PAT, optional SSH private key, and this project's origin (`https://…` or `git@…`).
+**Account** (Settings or Console → Secrets/Variables): global git name, email, GitHub username, PAT, and optional SSH private key.
 
 Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a file, or Stage all, then Commit. Message asks the model for a subject and does not commit. The commit list is the history of the current branch.
 

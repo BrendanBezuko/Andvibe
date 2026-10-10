@@ -77,6 +77,13 @@ class GitOpsTest {
         assertTrue(snap.changes.any { it.path == "README.md" })
         assertTrue(snap.commits.isNotEmpty())
         assertTrue(GitOps.status(project, repos).contains(snap.branch))
+
+        File(project, "README.md").writeText("changed again\n")
+        File(project, "junk.txt").writeText("junk\n")
+        assertEquals("discarded all changes", GitOps.discardAll(project, repos))
+        assertEquals("hello\n", File(project, "README.md").readText())
+        assertFalse(File(project, "junk.txt").exists())
+        assertTrue(GitOps.snapshot(project, repos).changes.isEmpty())
     }
 
     @Test

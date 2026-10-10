@@ -20,7 +20,6 @@ import com.example.andvibe.ProjectSession
 import com.example.andvibe.Provider
 import com.example.andvibe.R
 import com.example.andvibe.SecretStore
-import com.example.andvibe.core.GitOps
 import com.example.andvibe.databinding.PageConsoleBinding
 import com.example.andvibe.features.console.ConsoleFeature
 import com.example.andvibe.features.console.ConsoleLog
@@ -28,8 +27,6 @@ import com.google.android.material.tabs.TabLayout
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
@@ -42,8 +39,6 @@ class ConsolePageController(
     private val session: ProjectSession,
     private val store: SecretStore,
     private val lifecycleOwner: LifecycleOwner,
-    private val scope: CoroutineScope,
-    private val repoDispatcher: CoroutineDispatcher,
     private val color: (Int) -> Int,
     private val dp: (Int) -> Int,
     private val currentProvider: () -> Provider,
@@ -56,11 +51,9 @@ class ConsolePageController(
         gitName: String,
         gitEmail: String,
         gitUser: String,
-        origin: String,
     ) -> Unit,
     private val syncApiKeyField: (Provider, String) -> Unit,
     private val paintBusy: () -> Unit,
-    private val runOnUi: ( () -> Unit) -> Unit,
 ) {
     private val vault = mutableMapOf<String, EditText>()
 
@@ -129,9 +122,6 @@ class ConsolePageController(
         vault["git_name"]?.setText(store.gitName())
         vault["git_email"]?.setText(store.gitEmail())
         vault["git_user"]?.setText(store.gitUser())
-        vault["git_origin"]?.setText(
-            runCatching { GitOps.originUrl(session.cwd, session.reposDir) }.getOrDefault("")
-        )
     }
 
     fun setVaultKey(provider: Provider, key: String) {
@@ -196,7 +186,7 @@ class ConsolePageController(
 
         vaultNote(
             variables,
-            "Models, builder, and git identity. HTTPS remotes use the PAT; SSH remotes use the key in Secrets.",
+            "Models, builder, and global git identity. Per-project origin is on the Git tab.",
         )
         for (provider in Provider.entries) {
             vaultField(variables, "${provider.id}_model", "${provider.label} model", secret = false)
@@ -207,7 +197,6 @@ class ConsolePageController(
         vaultField(variables, "git_name", "Git name", secret = false)
         vaultField(variables, "git_email", "Git email", secret = false)
         vaultField(variables, "git_user", "GitHub username", secret = false)
-        vaultField(variables, "git_origin", "Origin (https://… or git@…)", secret = false)
         loadVault()
     }
 
@@ -303,7 +292,6 @@ class ConsolePageController(
         val name = vaultText("git_name")
         val email = vaultText("git_email")
         val user = vaultText("git_user")
-        val origin = vaultText("git_origin")
         store.saveBuild(url, store.buildToken())
         store.setPreferRemoteBuild(preferRemote)
         store.saveGit(name, email, user, store.gitToken(), store.gitSsh())
@@ -314,21 +302,10 @@ class ConsolePageController(
             name,
             email,
             user,
-            origin,
         )
-        scope.launch(repoDispatcher) {
-            val current = runCatching { GitOps.originUrl(session.cwd, session.reposDir) }.getOrDefault("")
-            val message = if (origin == current) {
-                "saved variables"
-            } else {
-                GitOps.setOrigin(session.cwd, session.reposDir, origin)
-            }
-            runOnUi {
-                log.append(message)
-                feature.refreshLog()
-                onLog()
-            }
-        }
+        log.append("saved variables")
+        feature.refreshLog()
+        onLog()
     }
 
     private fun vaultText(key: String): String = vault[key]?.text?.toString()?.trim().orEmpty()

@@ -151,11 +151,28 @@
             android:textColor="@color/ink"
             android:textSize="14sp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Global identity for every project. Set this project's origin on the Git tab (tap the remote line or ⋯ → Set origin)."
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFamily="monospace"
+            android:text="git_name"
+            android:textColor="@color/muted"
+            android:textSize="12sp" />
+
         <EditText
             android:id="@+id/gitName"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="4dp"
             android:background="@drawable/bg_field"
             android:hint="Name"
             android:importantForAutofill="no"
@@ -166,11 +183,20 @@
             android:textColorHint="@color/muted"
             android:textSize="14sp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFamily="monospace"
+            android:text="git_email"
+            android:textColor="@color/muted"
+            android:textSize="12sp" />
+
         <EditText
             android:id="@+id/gitEmail"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="4dp"
             android:background="@drawable/bg_field"
             android:hint="Email"
             android:importantForAutofill="no"
@@ -181,11 +207,20 @@
             android:textColorHint="@color/muted"
             android:textSize="14sp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFamily="monospace"
+            android:text="git_user"
+            android:textColor="@color/muted"
+            android:textSize="12sp" />
+
         <EditText
             android:id="@+id/gitHttpsUser"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="4dp"
             android:background="@drawable/bg_field"
             android:hint="GitHub username"
             android:importantForAutofill="no"
@@ -196,11 +231,20 @@
             android:textColorHint="@color/muted"
             android:textSize="14sp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFamily="monospace"
+            android:text="git_token"
+            android:textColor="@color/muted"
+            android:textSize="12sp" />
+
         <EditText
             android:id="@+id/gitHttpsToken"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="4dp"
             android:background="@drawable/bg_field"
             android:hint="GitHub token (PAT)"
             android:importantForAutofill="no"
@@ -211,11 +255,20 @@
             android:textColorHint="@color/muted"
             android:textSize="14sp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFamily="monospace"
+            android:text="git_ssh"
+            android:textColor="@color/muted"
+            android:textSize="12sp" />
+
         <EditText
             android:id="@+id/gitSsh"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="4dp"
             android:background="@drawable/bg_field"
             android:gravity="top|start"
             android:hint="SSH private key (optional)"
@@ -226,21 +279,6 @@
             android:textColor="@color/ink"
             android:textColorHint="@color/muted"
             android:textSize="12sp" />
-
-        <EditText
-            android:id="@+id/gitOrigin"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_field"
-            android:hint="Origin — https://… or git@github.com:…"
-            android:importantForAutofill="no"
-            android:inputType="textUri"
-            android:padding="10dp"
-            android:singleLine="true"
-            android:textColor="@color/ink"
-            android:textColorHint="@color/muted"
-            android:textSize="14sp" />
 
         <TextView
             android:layout_width="match_parent"

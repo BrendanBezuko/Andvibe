@@ -37,6 +37,16 @@
             android:tint="@color/ink" />
 
         <ImageButton
+            android:id="@+id/gitDiscardAll"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Discard all changes"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_git_discard"
+            android:tint="@color/ink" />
+
+        <ImageButton
             android:id="@+id/gitPull"
             android:layout_width="36dp"
             android:layout_height="36dp"
