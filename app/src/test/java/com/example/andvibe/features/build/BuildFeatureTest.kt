@@ -17,7 +17,10 @@ class BuildFeatureTest {
         assertTrue(log.text.value.contains("line one"))
         assertEquals(1, log.revision.value)
         log.append("line two")
-        assertEquals(2, log.revision.value)
+        // Second append within the publish throttle may not bump revision until flush.
+        log.flush()
+        assertTrue(log.text.value.contains("line two"))
+        assertTrue(log.revision.value >= 2)
     }
 
     @Test
@@ -59,5 +62,27 @@ class BuildFeatureTest {
         val note = "Build first. Revise uses that log."
         val state = BuildFeature.State(logText = note)
         assertEquals(note, state.logText)
+    }
+
+    @Test
+    fun flushPublishesBufferedAppends() {
+        val log = BuildLog()
+        log.append("burst-a")
+        log.append("burst-b")
+        log.flush()
+        val snap = log.snapshot()
+        assertTrue(snap.contains("burst-a"))
+        assertTrue(snap.contains("burst-b"))
+        assertEquals(snap, log.text.value)
+    }
+
+    @Test
+    fun stateBusyMutualExclusionShape() {
+        val building = BuildFeature.State(building = true, revising = false)
+        assertTrue(building.building)
+        assertFalse(building.revising)
+        val revising = building.copy(building = false, revising = true)
+        assertFalse(revising.building)
+        assertTrue(revising.revising)
     }
 }

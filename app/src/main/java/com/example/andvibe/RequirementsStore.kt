@@ -14,6 +14,10 @@ object RequirementsStore {
         filesDir = context.applicationContext.filesDir
     }
 
+    internal fun resetForTests() {
+        filesDir = null
+    }
+
     fun read(workspaceId: String = WorkspaceStore.current().id): String {
         if (workspaceId.isBlank()) return ""
         val file = file(workspaceId)

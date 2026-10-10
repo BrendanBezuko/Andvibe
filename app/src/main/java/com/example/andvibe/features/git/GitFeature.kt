@@ -117,6 +117,9 @@ class GitFeature(
     /**
      * Fork on GitHub via Build Tools `gh`, then point origin at your fork.
      * [repo] is `owner/name`, or blank to fork the current origin.
+     *
+     * `gh` only accepts `--remote` when forking the cwd repo (no slug). With a
+     * slug we fork then set origin ourselves (SSH if a key is saved).
      */
     fun forkRepo(repo: String) {
         val slug = repo.trim().removePrefix("https://github.com/").removePrefix("http://github.com/")
@@ -131,7 +134,7 @@ class GitFeature(
             val args = if (slug.isBlank()) {
                 listOf("repo", "fork", "--remote=true")
             } else {
-                listOf("repo", "fork", slug, "--remote=true")
+                listOf("repo", "fork", slug)
             }
             val result = CompanionCli.runGh(
                 context = app,
@@ -144,10 +147,23 @@ class GitFeature(
                 return@runGit result.output.ifBlank { "gh fork exited ${result.code}" }
             }
             val out = result.output.ifBlank { "forked${if (slug.isBlank()) "" else " $slug"}" }
-            // Prefer SSH origin when an SSH key is saved.
+            if (slug.isNotBlank()) {
+                val forkedSlug = resolveForkSlug(slug, result.output)
+                    ?: return@runGit "$out\nFork ok, but could not resolve your fork URL — set origin manually."
+                val url = if (secrets.gitSsh().isNotBlank()) {
+                    "git@github.com:$forkedSlug.git"
+                } else {
+                    "https://github.com/$forkedSlug.git"
+                }
+                val note = runCatching {
+                    GitOps.setOrigin(session.cwd, session.reposDir, url)
+                }.getOrDefault(url)
+                return@runGit "$out\n$note"
+            }
+            // Blank slug: gh --remote already rewrote remotes; prefer SSH if a key is saved.
             if (secrets.gitSsh().isNotBlank()) {
                 val origin = GitOps.originUrl(session.cwd, session.reposDir)
-                val forkedSlug = GitIdentity.githubSlug(origin).ifBlank { slug }
+                val forkedSlug = GitIdentity.githubSlug(origin)
                 if (forkedSlug.isNotBlank() && !GitOps.isSshUrl(origin)) {
                     val ssh = "git@github.com:$forkedSlug.git"
                     val note = runCatching {
@@ -160,8 +176,60 @@ class GitFeature(
         }
     }
 
+    /** Fork owner/name from gh output, or PAT login + source repo name. */
+    private fun resolveForkSlug(sourceSlug: String, ghOutput: String): String? {
+        val fromOut = Regex("""(?i)https://github\.com/([^/\s]+)/([^/\s]+)""")
+            .findAll(ghOutput)
+            .map { "${it.groupValues[1]}/${it.groupValues[2].removeSuffix(".git")}" }
+            .lastOrNull { !it.equals(sourceSlug, ignoreCase = true) }
+        if (fromOut != null) return fromOut
+        val login = CompanionCli.runGh(
+            context = app,
+            secrets = secrets,
+            args = listOf("api", "user", "-q", ".login"),
+            cwd = session.cwd,
+            log = log,
+        )
+        if (login.code != 0) return null
+        val user = login.output.trim().lines().lastOrNull()?.trim().orEmpty()
+        if (user.isBlank()) return null
+        return "$user/${sourceSlug.substringAfterLast('/')}"
+    }
+
     fun suggestedForkSlug(): String =
         GitIdentity.githubSlug(GitOps.originUrl(session.cwd, session.reposDir))
+
+    /**
+     * Open a GitHub pull request via Build Tools `gh`.
+     * Blank [title] uses `gh pr create --fill` (commit subjects).
+     */
+    fun createPullRequest(title: String, body: String) {
+        runGit("Pull request", clearDetail = true) {
+            if (secrets.gitToken().isBlank()) {
+                return@runGit "Add a GitHub token (PAT) in Settings — Create PR uses gh with GH_TOKEN."
+            }
+            if (!CompanionCli.ready(app)) {
+                return@runGit "Install Build Tools (Build tab) for gh, then Create PR again."
+            }
+            val t = title.trim()
+            val args = if (t.isBlank()) {
+                listOf("pr", "create", "--fill")
+            } else {
+                listOf("pr", "create", "--title", t, "--body", body.trim())
+            }
+            val result = CompanionCli.runGh(
+                context = app,
+                secrets = secrets,
+                args = args,
+                cwd = session.cwd,
+                log = log,
+            )
+            if (result.code != 0) {
+                return@runGit result.output.ifBlank { "gh pr create exited ${result.code}" }
+            }
+            result.output.ifBlank { "pull request created" }
+        }
+    }
 
     fun initRepo() = runGit(clearDetail = true) {
         val dir = runCatching { session.projectRoot() }.getOrElse {

@@ -48,21 +48,26 @@ object PromptStore {
     }
 
     private const val PREF = "andvibe_prompts"
-    private lateinit var prefs: SharedPreferences
+    private var prefs: SharedPreferences? = null
 
     fun init(context: Context) {
-        if (::prefs.isInitialized) return
+        if (prefs != null) return
         prefs = context.applicationContext.getSharedPreferences(PREF, Context.MODE_PRIVATE)
     }
 
+    internal fun resetForTests() {
+        prefs = null
+    }
+
     fun get(kind: Kind): String {
-        val saved = prefs.getString(kind.key, null)?.trim()
+        val saved = prefs?.getString(kind.key, null)?.trim()
         return if (saved.isNullOrEmpty()) default(kind) else saved
     }
 
     fun set(kind: Kind, text: String) {
+        val store = prefs ?: return
         val trimmed = text.trim()
-        val edit = prefs.edit()
+        val edit = store.edit()
         if (trimmed.isEmpty() || trimmed == default(kind)) {
             edit.remove(kind.key)
         } else {
@@ -72,15 +77,15 @@ object PromptStore {
     }
 
     fun reset(kind: Kind) {
-        prefs.edit().remove(kind.key).apply()
+        prefs?.edit()?.remove(kind.key)?.apply()
     }
 
     fun resetAll() {
-        prefs.edit().clear().apply()
+        prefs?.edit()?.clear()?.apply()
     }
 
     fun isCustom(kind: Kind): Boolean {
-        val saved = prefs.getString(kind.key, null)?.trim()
+        val saved = prefs?.getString(kind.key, null)?.trim()
         return !saved.isNullOrEmpty() && saved != default(kind)
     }
 

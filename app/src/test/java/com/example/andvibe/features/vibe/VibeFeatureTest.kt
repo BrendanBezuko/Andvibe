@@ -49,4 +49,25 @@ class VibeFeatureTest {
         assertFalse(during.busy)
         assertTrue(during.agentSteps.isEmpty())
     }
+
+    @Test
+    fun commitKeepsBlankAssistantResult() {
+        val out = VibeFeature.commitAssistantReply(
+            listOf("user" to "go"),
+            listOf("step"),
+            "",
+        )
+        assertEquals("assistant" to "", out.last())
+        assertEquals("steps", out[1].first)
+    }
+
+    @Test
+    fun stoppingWhileBusyShape() {
+        val stopping = VibeFeature.State(busy = true, stopping = true)
+        assertTrue(stopping.busy)
+        assertTrue(stopping.stopping)
+        val idle = stopping.copy(busy = false, stopping = false, agentSteps = emptyList())
+        assertFalse(idle.busy)
+        assertFalse(idle.stopping)
+    }
 }

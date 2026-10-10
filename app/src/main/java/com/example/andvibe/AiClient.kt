@@ -264,7 +264,7 @@ object AiClient {
         return file.extension.lowercase() in sourceExt
     }
 
-    private fun apply(root: File, files: List<Pair<String, String>>): List<File> {
+    internal fun apply(root: File, files: List<Pair<String, String>>): List<File> {
         val written = mutableListOf<File>()
         for ((path, content) in files) {
             if (content.length > 500_000) error("refusing a file over 500KB: $path")
@@ -281,7 +281,7 @@ object AiClient {
         return written
     }
 
-    private fun parse(raw: String): Pair<String, List<Pair<String, String>>> {
+    internal fun parse(raw: String): Pair<String, List<Pair<String, String>>> {
         val body = extractJson(raw)
         try {
             val json = JSONObject(body)
@@ -291,7 +291,7 @@ object AiClient {
         }
     }
 
-    private fun extractJson(raw: String): String {
+    internal fun extractJson(raw: String): String {
         var text = raw.trim().removePrefix("\uFEFF")
         if (text.startsWith("```")) {
             text = text.substringAfter('\n', text)
@@ -305,7 +305,7 @@ object AiClient {
         return text.substring(start, end + 1)
     }
 
-    private fun parseFiles(json: JSONObject): List<Pair<String, String>> {
+    internal fun parseFiles(json: JSONObject): List<Pair<String, String>> {
         if (!json.has("files") || json.isNull("files")) return emptyList()
         return when (val value = json.get("files")) {
             is JSONArray -> buildList {

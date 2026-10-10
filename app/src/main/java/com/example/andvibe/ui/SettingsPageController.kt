@@ -1,6 +1,8 @@
 package com.example.andvibe.ui
 
+import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -61,6 +63,9 @@ class SettingsPageController(
             renderMcp()
         }
         page.allowBackground.setOnClickListener { requestBackground() }
+        page.gitSetupGuide.setOnClickListener {
+            activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_SETUP_URL)))
+        }
         page.saveGit.setOnClickListener { saveGitSettings() }
         page.saveApiKeys.setOnClickListener { saveApiKeys(announce = true) }
         page.savePrompts.setOnClickListener { savePrompts(announce = true) }
@@ -292,5 +297,9 @@ class SettingsPageController(
         page.gitSettingsNote.text = note
         log(note)
         if (currentTab() == Tab.GIT) refreshGitIfVisible()
+    }
+
+    companion object {
+        private const val GITHUB_SETUP_URL = "https://andvibe.org/github/"
     }
 }

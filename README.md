@@ -118,7 +118,7 @@ test                         run *.test.js and test/
 run [file]                   preview HTML or run JS
 ```
 
-`git clone` accepts `https://` or `git@` / `ssh://`. GitHub, GitLab, Codeberg, and Bitbucket can fall back to a snapshot download if the git protocol fails on the device. Git-tab push/pull use the PAT for HTTPS remotes and the SSH private key for `git@` remotes. Git → ⋯ → **Fork on GitHub** runs Build Tools `gh` (needs the PAT).
+`git clone` accepts `https://` or `git@` / `ssh://`. GitHub, GitLab, Codeberg, and Bitbucket can fall back to a snapshot download if the git protocol fails on the device. Git-tab push/pull use the PAT for HTTPS remotes and the SSH private key for `git@` remotes. Git → ⋯ → **Fork on GitHub** / **Create pull request** run Build Tools `gh` (needs the PAT).
 
 `compile` syntax-checks JavaScript. `test` runs `*.test.js`, `*.spec.js`, and files under `test/`. Tests can use `assert(cond, msg)`, `assert.equal(a, b)`, and `assert.strictEqual(a, b)`. `run` opens `index.html` or runs a `.js` file. Relative `require("./file.js")` works. npm packages, `import`/`export`, Python, Rust, and Go do not run on the phone.
 
@@ -128,7 +128,7 @@ run [file]                   preview HTML or run JS
 
 **Open** copies a folder from the phone, including `.git`. `node_modules`, `build`, and `.gradle` are skipped. The copy stops at 200MB.
 
-The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or open. Stage all, Commit, Pull, Push, Fetch, Fork, Branch, Log, and Init are on that tab.
+The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or open. Stage all, Commit, Pull, Push, Fetch, Fork, Create PR, Branch, Log, and Init are on that tab.
 
 **Account** (Settings or Console → Secrets/Variables): git name, email, GitHub username, PAT, optional SSH private key, and this project's origin (`https://…` or `git@…`).
 

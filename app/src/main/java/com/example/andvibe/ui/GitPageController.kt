@@ -2,6 +2,7 @@ package com.example.andvibe.ui
 
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.Gravity
 import android.view.View
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -401,6 +402,7 @@ class GitPageController(
             "Unstage all" to { saveEditor(); feature.unstageAll() },
             "Fetch" to { saveEditor(); feature.fetch() },
             "Fork on GitHub…" to { promptFork() },
+            "Create pull request…" to { promptCreatePullRequest() },
             "Checkout branch…" to { showBranches() },
             "Full log" to { saveEditor(); feature.showHistory() },
             "Initialize repository" to { saveEditor(); feature.initRepo() },
@@ -427,6 +429,39 @@ class GitPageController(
             .setPositiveButton("Fork") { _, _ ->
                 saveEditor()
                 feature.forkRepo(input.text?.toString().orEmpty())
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun promptCreatePullRequest() {
+        if (feature.state.value.busy) return
+        val pad = (16 * activity.resources.displayMetrics.density).toInt()
+        val title = EditText(activity).apply {
+            hint = "Title (blank = fill from commits)"
+            setSingleLine(true)
+        }
+        val body = EditText(activity).apply {
+            hint = "Body (optional)"
+            minLines = 3
+            gravity = Gravity.TOP or Gravity.START
+        }
+        val form = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+            addView(title)
+            addView(body)
+        }
+        AlertDialog.Builder(activity)
+            .setTitle("Create pull request")
+            .setMessage("Uses Build Tools gh + your GitHub token. Push the branch first. Blank title fills from commit subjects.")
+            .setView(form)
+            .setPositiveButton("Create") { _, _ ->
+                saveEditor()
+                feature.createPullRequest(
+                    title.text?.toString().orEmpty(),
+                    body.text?.toString().orEmpty(),
+                )
             }
             .setNegativeButton("Cancel", null)
             .show()

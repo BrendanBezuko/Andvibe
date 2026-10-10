@@ -20,4 +20,22 @@ class GitIdentityTest {
         )
         assertEquals("", GitIdentity.githubSlug("https://gitlab.com/owner/repo"))
     }
+
+    @Test
+    fun githubSlugEdges() {
+        assertEquals(
+            "owner/repo",
+            GitIdentity.githubSlug("https://www.github.com/owner/repo/"),
+        )
+        assertEquals(
+            "owner/repo",
+            GitIdentity.githubSlug("HTTPS://GitHub.com/owner/repo.git"),
+        )
+        assertEquals(
+            "owner/repo",
+            GitIdentity.githubSlug("  git@github.com:owner/repo.git  "),
+        )
+        assertEquals("", GitIdentity.githubSlug(""))
+        assertEquals("", GitIdentity.githubSlug("not-a-url"))
+    }
 }

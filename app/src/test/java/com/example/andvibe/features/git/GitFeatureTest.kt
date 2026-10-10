@@ -54,10 +54,39 @@ class GitFeatureTest {
         assertNull(closed.detail)
     }
 
-    private fun sampleSnapshot() = GitOps.Snapshot(
+    @Test
+    fun snapshotChangeLabelsFeedSuggestMessage() {
+        val snap = sampleSnapshot(
+            changes = listOf(
+                GitOps.Change("a.kt", "M ", staged = true, unstaged = false),
+                GitOps.Change("b.kt", "??", staged = false, unstaged = true),
+            ),
+        )
+        val files = snap.changes.joinToString("\n") { it.label }
+        assertEquals("M  a.kt\n?? b.kt", files)
+        assertTrue(snap.isRepo)
+        assertEquals("origin", snap.remote)
+    }
+
+    @Test
+    fun notARepoSnapshotKeepsUiIdleShape() {
+        val snap = GitOps.Snapshot(
+            branch = "",
+            summary = "Not a git repo. Tap Init, or open a folder that has .git.",
+            changes = emptyList(),
+            isRepo = false,
+        )
+        val state = GitFeature.State(snapshot = snap, busy = false)
+        assertFalse(state.snapshot!!.isRepo)
+        assertTrue(state.snapshot!!.summary.contains("Not a git repo"))
+    }
+
+    private fun sampleSnapshot(
+        changes: List<GitOps.Change> = emptyList(),
+    ) = GitOps.Snapshot(
         branch = "main",
-        summary = "clean",
-        changes = emptyList(),
+        summary = if (changes.isEmpty()) "clean" else "${changes.count { it.staged }} staged",
+        changes = changes,
         isRepo = true,
         commits = emptyList(),
         ahead = 0,

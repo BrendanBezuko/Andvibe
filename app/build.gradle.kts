@@ -36,6 +36,7 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
     }
     packaging {
         // Extract jniLibs to nativeLibraryDir so LD_PRELOAD (libjrehome.so) has a path.
@@ -53,7 +54,9 @@ android {
                 "META-INF/NOTICE.md",
                 "META-INF/INDEX.LIST",
                 "META-INF/AL2.0",
-                "META-INF/LGPL2.1"
+                "META-INF/LGPL2.1",
+                // jgit + jgit.ssh.apache both ship this OSGi l10n stub.
+                "OSGI-INF/l10n/plugin.properties",
             )
         }
     }
@@ -91,6 +94,8 @@ dependencies {
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
     // Real org.json for JVM tests (Android stubs return null with returnDefaultValues).
     testImplementation(libs.org.json)
     androidTestImplementation(libs.androidx.espresso.core)

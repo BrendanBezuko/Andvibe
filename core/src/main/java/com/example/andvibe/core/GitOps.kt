@@ -124,7 +124,8 @@ object GitOps {
         return try {
             prepare()
             Git.open(root).use { git ->
-                git.reset().setMode(ResetType.MIXED).addPath(rel).call()
+                // Path reset must not set MIXED/SOFT/HARD — JGit rejects that combo.
+                git.reset().addPath(rel).call()
             }
             "unstaged $rel"
         } catch (t: Throwable) {

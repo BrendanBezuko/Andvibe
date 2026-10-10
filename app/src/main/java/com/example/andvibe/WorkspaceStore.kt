@@ -55,6 +55,17 @@ object WorkspaceStore {
         }
     }
 
+    /** Clears singleton state between JVM unit tests. */
+    internal fun resetForTests() {
+        synchronized(this) {
+            ready = false
+            items.clear()
+            currentId = ""
+            scoped = false
+            onUsageChanged = null
+        }
+    }
+
     fun current(): Workspace = synchronized(this) { live() }
 
     fun workspaces(): List<Workspace> = synchronized(this) { items.toList() }

@@ -1,5 +1,6 @@
 package com.example.andvibe.ui
 
+import android.graphics.Typeface
 import android.text.InputType
 import android.text.SpannableString
 import android.text.Spanned
@@ -219,6 +220,19 @@ class ConsolePageController(
     }
 
     private fun vaultField(parent: LinearLayout, key: String, hint: String, secret: Boolean, lines: Int = 1) {
+        val label = TextView(parent.context).apply {
+            text = key
+            setTextColor(color(R.color.muted))
+            textSize = 12f
+            typeface = Typeface.MONOSPACE
+        }
+        val labelParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        )
+        labelParams.topMargin = dp(12)
+        parent.addView(label, labelParams)
+
         val field = EditText(parent.context).apply {
             this.hint = hint
             setHintTextColor(color(R.color.muted))
@@ -244,7 +258,7 @@ class ConsolePageController(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         )
-        params.topMargin = dp(8)
+        params.topMargin = dp(4)
         parent.addView(field, params)
         vault[key] = field
     }
