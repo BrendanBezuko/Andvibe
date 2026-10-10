@@ -97,6 +97,31 @@ object WorkspaceStore {
 
     fun include(name: String) = setRepo(name, true)
 
+    /**
+     * Deletes a downloaded repo folder from disk and drops it from every workspace.
+     * Returns false if the name is invalid or the path is outside the repos dir.
+     */
+    fun deleteDownloaded(name: String): Boolean = synchronized(this) {
+        val clean = cleanRepo(name) ?: return false
+        if (!::reposDir.isInitialized) return false
+        val root = reposDir.canonicalFile
+        val dir = File(reposDir, clean).canonicalFile
+        if (dir == root || !dir.path.startsWith(root.path + File.separator)) return false
+        if (dir.exists()) {
+            if (!dir.isDirectory) return false
+            if (!dir.deleteRecursively() && dir.exists()) return false
+        }
+        var changed = false
+        for (i in items.indices) {
+            if (clean in items[i].repos) {
+                items[i] = items[i].copy(repos = items[i].repos - clean)
+                changed = true
+            }
+        }
+        if (changed) save()
+        true
+    }
+
     fun migrate() {
         synchronized(this) {
             if (scoped) return

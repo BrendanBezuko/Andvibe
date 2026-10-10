@@ -27,7 +27,7 @@ Use each tab like this:
 3. Search - Search foss for similar projects as starting points
 4. Files - Confirm the files and make any necessary manual edits
 5. Understand - Generate a full breakdown of the current project
-6. Vibe - An agent will plan, check with you about the architecture and changes, scafold the project, Provision cloud resources, tests, vulnerbilitiscanner, permissions, and summarize the results, 
+6. Vibe - An agent will plan, check with you about the architecture and changes, scafold the project, Provision cloud resources, tests, vulnerbilitiscanner, permissions, and summarize the results,
 7. Build - Local Gradle toolchain (optional remote builder)
 8. Git - versioning
 
@@ -358,3 +358,13 @@ adb -s <serial from adb devices> forward tcp:8765 tcp:8765
 ```
 
 Open AndVibe on that phone first. Cursor still uses `http://127.0.0.1:8765/mcp`. Run the forward again after the phone disconnects.
+
+create release:
+
+```bash
+gh release create v1.3.0-debug \
+  --target main \
+  --title "v1.3.0-debug" \
+  --generate-notes \
+  app/build/outputs/apk/debug/app-debug.apk
+```

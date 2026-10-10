@@ -73,6 +73,26 @@ class WorkspaceStoreTest {
     }
 
     @Test
+    fun deleteDownloadedRemovesFolderAndAllWorkspaceRefs() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val repos = File(ctx.filesDir, "repos")
+        val demo = File(repos, "demo").also { it.mkdirs() }
+        File(demo, "README.md").writeText("hi")
+        WorkspaceStore.include("demo")
+        WorkspaceStore.create("Other")
+        WorkspaceStore.include("demo")
+
+        assertTrue(WorkspaceStore.deleteDownloaded("demo"))
+        assertFalse(demo.exists())
+        assertFalse(WorkspaceStore.downloaded().contains("demo"))
+        for (ws in WorkspaceStore.workspaces()) {
+            assertFalse(ws.repos.contains("demo"))
+        }
+        assertFalse(WorkspaceStore.deleteDownloaded(".."))
+        assertFalse(WorkspaceStore.deleteDownloaded("nope/../escape"))
+    }
+
+    @Test
     fun addUseTracksCost() {
         val before = WorkspaceStore.current().costMicros
         WorkspaceStore.addUse("claude-sonnet", 1_000_000, 1_000_000)

@@ -14,12 +14,13 @@ import com.example.andvibe.ProjectSession
 import com.example.andvibe.R
 import com.example.andvibe.WorkspaceStore
 import com.example.andvibe.databinding.PageWorkspaceBinding
+import com.example.andvibe.databinding.RowWorkspaceBinding
+import com.example.andvibe.databinding.RowWorkspaceRepoBinding
 import com.example.andvibe.features.workspace.WorkspaceFeature
-import com.google.android.material.checkbox.MaterialCheckBox
 import kotlinx.coroutines.launch
 
 /**
- * Workspace overlay: open/close, repo checks, list, rename/create/delete.
+ * Workspace overlay: open/close, repo checks/delete, list, rename/create/delete.
  * Switch refusals use [WorkspaceFeature.switchBlockedBy] / [WorkspaceFeature.switchTo].
  */
 class WorkspacePageController(
@@ -111,18 +112,15 @@ class WorkspacePageController(
         val repos = page.repoList
         repos.removeAllViews()
         for (name in names) {
-            val box = MaterialCheckBox(activity).apply {
-                text = name
-                isChecked = name in ws.repos
-                setOnCheckedChangeListener { _, checked ->
-                    feature.setRepoIncluded(name, checked)
-                    if (!session.fitWorkspace()) {
-                        refreshFileList()
-                        markVibeProjectChanged()
-                    }
-                }
+            val row = RowWorkspaceRepoBinding.inflate(inflate, repos, false)
+            row.repoCheck.text = name
+            row.repoCheck.isChecked = name in ws.repos
+            row.repoCheck.setOnCheckedChangeListener { _, checked ->
+                feature.setRepoIncluded(name, checked)
+                afterRepoChange()
             }
-            repos.addView(box)
+            row.repoDelete.setOnClickListener { confirmDeleteRepo(name) }
+            repos.addView(row.root)
         }
     }
 
@@ -141,20 +139,45 @@ class WorkspacePageController(
         return false
     }
 
+    private fun canChangeRepos(): Boolean {
+        feature.refresh()
+        val blocked = feature.state.value.switchBlockedBy ?: return true
+        Toast.makeText(
+            activity,
+            "Wait for $blocked to finish before deleting a repo",
+            Toast.LENGTH_SHORT,
+        ).show()
+        return false
+    }
+
+    private fun afterRepoChange() {
+        if (!session.fitWorkspace()) {
+            refreshFileList()
+            markVibeProjectChanged()
+        }
+    }
+
     private fun renderWorkspaces() {
         val current = WorkspaceStore.current()
         val list = page.workspaceList
         list.removeAllViews()
         for (ws in WorkspaceStore.workspaces()) {
-            val row = inflate.inflate(R.layout.row_file, list, false) as android.widget.TextView
-            row.text = ws.name
-            row.setTextColor(color(if (ws.id == current.id) R.color.accent else R.color.ink))
-            row.setOnClickListener {
+            val row = RowWorkspaceBinding.inflate(inflate, list, false)
+            val active = ws.id == current.id
+            row.workspaceRowName.text = ws.name
+            row.workspaceRowName.setTextColor(color(if (active) R.color.accent else R.color.ink))
+            row.workspaceRowMeta.text = when {
+                ws.repos.isEmpty() -> "No repos"
+                ws.repos.size == 1 -> "1 repo"
+                else -> "${ws.repos.size} repos"
+            }
+            row.workspaceActive.visibility = if (active) View.VISIBLE else View.INVISIBLE
+            row.root.setOnClickListener {
                 if (ws.id == current.id || !canSwitchWorkspace()) return@setOnClickListener
                 saveWorkspaceName()
                 feature.switchTo(ws.id)
             }
-            list.addView(row)
+            list.addView(row.root)
         }
     }
 
@@ -190,6 +213,25 @@ class WorkspacePageController(
                     forgetWorkspaceExtras(id)
                 }
                 onSwitched()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun confirmDeleteRepo(name: String) {
+        if (!canChangeRepos()) return
+        AlertDialog.Builder(activity)
+            .setTitle(name)
+            .setMessage("Delete this repo from the phone? The folder is removed for every workspace.")
+            .setPositiveButton("Delete") { _, _ ->
+                if (!feature.deleteRepo(name)) {
+                    Toast.makeText(activity, "Could not delete $name", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                afterRepoChange()
+                renderRepoChecks()
+                renderWorkspaces()
+                onUsage()
             }
             .setNegativeButton("Cancel", null)
             .show()

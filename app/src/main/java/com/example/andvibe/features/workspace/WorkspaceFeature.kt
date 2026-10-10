@@ -83,4 +83,10 @@ class WorkspaceFeature(
         WorkspaceStore.setRepo(name, included)
         refresh()
     }
+
+    fun deleteRepo(name: String): Boolean {
+        val ok = WorkspaceStore.deleteDownloaded(name)
+        refresh()
+        return ok
+    }
 }
