@@ -160,4 +160,36 @@ class GitOpsTest {
         assertTrue(result.contains("..."))
         assertTrue(File(project, ".git").isDirectory)
     }
+
+    @Test
+    fun outgoingIsWholeTreeOnFirstPushThenOnlyNewLines() {
+        GitOps.init(project)
+        File(project, "README.md").writeText("hello\n")
+        File(project, ".env").writeText("A=1\n")
+        GitOps.stageAll(project, repos)
+        GitOps.commit(project, repos, "first")
+
+        val first = GitOps.outgoing(project, repos)
+        assertEquals(setOf("README.md", ".env"), first.names.toSet())
+        assertEquals(listOf(1 to "hello"), first.files.first { it.path == "README.md" }.lines)
+
+        // Pretend the first commit was pushed: point origin/<branch> at it.
+        org.eclipse.jgit.api.Git.open(project).use { git ->
+            val branch = git.repository.branch
+            val update = git.repository.updateRef("refs/remotes/origin/$branch")
+            update.setNewObjectId(git.repository.resolve("HEAD"))
+            update.forceUpdate()
+        }
+        val token = "gh" + "p_" + "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5"
+        File(project, "README.md").writeText("hello\nworld\n")
+        File(project, "Config.kt").writeText("val a = 1\nval t = \"$token\"\n")
+        GitOps.stageAll(project, repos)
+        GitOps.commit(project, repos, "second")
+
+        val next = GitOps.outgoing(project, repos)
+        assertEquals(setOf("README.md", "Config.kt"), next.names.toSet())
+        assertEquals(listOf(2 to "world"), next.files.first { it.path == "README.md" }.lines)
+        val findings = GitOps.scanOutgoing(project, repos).getOrThrow()
+        assertEquals(listOf("Config.kt" to 2), findings.map { it.path to it.line })
+    }
 }

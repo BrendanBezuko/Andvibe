@@ -30,7 +30,7 @@ class CompanionCliSshHomeTest {
     @Test
     fun ensureSshHomeWritesPemNewlineAndIdentityFile() {
         val home = tmp.newFolder("home")
-        val pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----"
+        val pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----" // fake fixture; gitleaks:allow
         secrets.saveGit("n", "e", "u", "tok", pem)
 
         CompanionCli.ensureSshHome(home, secrets)

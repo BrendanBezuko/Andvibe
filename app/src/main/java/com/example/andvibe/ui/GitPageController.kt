@@ -116,11 +116,26 @@ class GitPageController(
                                 page.gitMessage.setText(effect.text)
                                 bindingDraft = false
                             }
+                            is GitFeature.Effect.ConfirmSecretPush -> confirmSecretPush(effect.findings)
                         }
                     }
                 }
             }
         }
+    }
+
+    private fun confirmSecretPush(findings: List<com.example.andvibe.core.SecretScan.Finding>) {
+        val shown = findings.take(12).joinToString("\n") { it.label } +
+            if (findings.size > 12) "\n…and ${findings.size - 12} more" else ""
+        AlertDialog.Builder(activity)
+            .setTitle("Possible secrets — not pushed")
+            .setMessage(
+                "$shown\n\nRemove them and amend the commit (and rotate any real key). " +
+                    "If a match is safe, add gitleaks:allow to that line."
+            )
+            .setPositiveButton("Cancel", null)
+            .setNegativeButton("Push anyway") { _, _ -> feature.push(allowSecrets = true) }
+            .show()
     }
 
     fun onTabVisible() {

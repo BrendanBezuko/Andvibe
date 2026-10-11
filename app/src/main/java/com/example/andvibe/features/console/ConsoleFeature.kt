@@ -127,7 +127,7 @@ AndVibe
   git clone <https-url> [dir]
   git status | add <file> | add .
   git commit -m "message"
-  git push | pull | fetch | log
+  git push [--allow-secrets] | pull | fetch | log
   git diff [file] | branch
   git checkout <branch>
   git checkout -b <name>
@@ -328,6 +328,14 @@ HTML projects open in a preview.
                 refreshGit = true
             }
             "push" -> {
+                if ("--allow-secrets" !in args) {
+                    val findings = GitOps.scanOutgoing(cwd, repos).getOrNull().orEmpty()
+                    if (findings.isNotEmpty()) {
+                        ctx.log.append(com.example.andvibe.core.SecretScan.report(findings))
+                        ctx.log.append("Not pushed. Run git push --allow-secrets to push anyway.")
+                        return
+                    }
+                }
                 ctx.log.append(GitOps.push(cwd, repos))
                 refreshGit = true
             }

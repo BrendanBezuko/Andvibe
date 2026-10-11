@@ -46,6 +46,9 @@ class GitFeature(
 
     sealed interface Effect {
         data class SetCommitDraft(val text: String) : Effect
+
+        /** Pre-push scan found likely secrets; the UI asks before [push] with allowSecrets. */
+        data class ConfirmSecretPush(val findings: List<com.example.andvibe.core.SecretScan.Finding>) : Effect
     }
 
     private val _state = MutableStateFlow(State())
@@ -122,7 +125,20 @@ class GitFeature(
 
     fun pull() = runGit("Pull", clearDetail = true) { GitOps.pull(session.cwd, session.reposDir) }
 
-    fun push() = runGit("Push", clearDetail = true) { GitOps.push(session.cwd, session.reposDir) }
+    /** Scans what's about to leave for secrets first; [allowSecrets] skips that after the user confirmed. */
+    fun push(allowSecrets: Boolean = false) = runGit("Push", clearDetail = true) {
+        if (!allowSecrets) {
+            val scan = GitOps.scanOutgoing(session.cwd, session.reposDir)
+            val findings = scan.getOrNull().orEmpty()
+            scan.exceptionOrNull()?.let { DebugLog.step("git", "secret scan failed: ${it.message}") }
+            if (findings.isNotEmpty()) {
+                DebugLog.step("git", "push blocked: ${findings.size} possible secret(s)")
+                effects.tryEmit(Effect.ConfirmSecretPush(findings))
+                return@runGit com.example.andvibe.core.SecretScan.report(findings)
+            }
+        }
+        GitOps.push(session.cwd, session.reposDir)
+    }
 
     fun fetch() = runGit("Fetch", clearDetail = true) { GitOps.fetch(session.cwd, session.reposDir) }
 

@@ -2,6 +2,9 @@ package com.example.andvibe.core
 
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.ResetCommand.ResetType
+import org.eclipse.jgit.diff.DiffEntry
+import org.eclipse.jgit.diff.DiffFormatter
+import org.eclipse.jgit.diff.RawText
 import org.eclipse.jgit.lib.BranchTrackingStatus
 import org.eclipse.jgit.lib.PersonIdent
 import org.eclipse.jgit.revwalk.RevTag
@@ -13,6 +16,7 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 import org.eclipse.jgit.transport.http.JDKHttpConnectionFactory
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.treewalk.filter.PathFilter
+import org.eclipse.jgit.util.io.DisabledOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
@@ -508,6 +512,68 @@ object GitOps {
             }
             if (lines.isEmpty()) "push ok" else lines.joinToString("\n")
         }
+    }
+
+    /** What a push of the current branch would send: changed file names and their added lines. */
+    data class Outgoing(val files: List<SecretScan.Outgoing>, val names: List<String>)
+
+    private const val SCAN_MAX_BYTES = 1_000_000
+
+    /**
+     * Commits on HEAD not yet on origin/<branch>, as added lines per file. With no remote-tracking
+     * branch (first push), every file in HEAD counts as added.
+     */
+    fun outgoing(start: File, repos: File): Outgoing {
+        val root = repo(start, repos)
+        prepare()
+        Git.open(root).use { git ->
+            val repo = git.repository
+            val head = repo.resolve("HEAD^{commit}") ?: return Outgoing(emptyList(), emptyList())
+            val remote = repo.branch?.let { repo.resolve("refs/remotes/origin/$it^{commit}") }
+            val files = mutableListOf<SecretScan.Outgoing>()
+            val names = mutableListOf<String>()
+            fun text(id: org.eclipse.jgit.lib.ObjectId): RawText? {
+                val loader = repo.open(id)
+                if (loader.size > SCAN_MAX_BYTES) return null
+                val bytes = loader.bytes
+                return if (RawText.isBinary(bytes)) null else RawText(bytes)
+            }
+            RevWalk(repo).use { walk ->
+                val headTree = walk.parseCommit(head).tree
+                if (remote == null) {
+                    TreeWalk(repo).use { tw ->
+                        tw.addTree(headTree)
+                        tw.isRecursive = true
+                        while (tw.next()) {
+                            names += tw.pathString
+                            val raw = text(tw.getObjectId(0)) ?: continue
+                            files += SecretScan.Outgoing(tw.pathString, (0 until raw.size()).map { it + 1 to raw.getString(it) })
+                        }
+                    }
+                } else {
+                    val baseTree = walk.parseCommit(remote).tree
+                    DiffFormatter(DisabledOutputStream.INSTANCE).use { df ->
+                        df.setRepository(repo)
+                        for (entry in df.scan(baseTree, headTree)) {
+                            if (entry.changeType == DiffEntry.ChangeType.DELETE) continue
+                            names += entry.newPath
+                            val raw = text(entry.newId.toObjectId()) ?: continue
+                            val added = df.toFileHeader(entry).toEditList().flatMap { edit ->
+                                (edit.beginB until edit.endB).map { it + 1 to raw.getString(it) }
+                            }
+                            if (added.isNotEmpty()) files += SecretScan.Outgoing(entry.newPath, added)
+                        }
+                    }
+                }
+            }
+            return Outgoing(files, names)
+        }
+    }
+
+    /** Secret findings in [outgoing]; never throws (a scan failure must not block a push silently). */
+    fun scanOutgoing(start: File, repos: File): Result<List<SecretScan.Finding>> = runCatching {
+        val out = outgoing(start, repos)
+        SecretScan.scan(out.files, out.names)
     }
 
     fun remoteSummary(start: File, repos: File): String {
