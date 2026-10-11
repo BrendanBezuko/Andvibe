@@ -130,6 +130,8 @@ run [file]                   preview HTML or run JS
 
 The Git tab is the change list. Tap a file for diff, stage, unstage, discard, or open. Stage all, Discard all, Commit, Pull, Push, Fetch, Fork, Create PR, Branch, Log, and Init are on that tab. Tap the remote line (or ⋯ → Set origin) for this project's origin URL.
 
+**Secret scan before push.** Push first scans what is about to leave the phone: the lines added by commits that aren't on `origin` yet (or every file, on a first push). It looks for private keys, AWS/GitHub/GitLab/Slack/Google/Stripe/OpenAI/Anthropic/npm tokens, JWTs, high-entropy `api_key = "…"` style values, and secret-looking files (`.env`, `*.jks`, `id_rsa`, `service-account*.json`). If anything matches, nothing is pushed and a dialog lists the findings (redacted) with **Push anyway**. In the console, `git push --allow-secrets` overrides. Put `gitleaks:allow` on a line that is a known false positive.
+
 **Account** (Settings or Console → Secrets/Variables): global git name, email, GitHub username, PAT, and optional SSH private key.
 
 Vibe and Revise leave the files uncommitted. On the Git tab, tap + to stage a file, or Stage all, then Commit. Message asks the model for a subject and does not commit. The commit list is the history of the current branch.
@@ -144,7 +146,7 @@ The Board tab is a workspace kanban with five status columns: Back burner, To do
 
 Open a project, then open the Understand tab (brain icon). Optionally type a focus, such as the agent loop or the build path. Tap **Understand**.
 
-The phone scans the repo for function and method signatures, packs a file tree and a few key file heads, and asks the model selected on the Vibe tab for code ratings (bar + pie graphs at the top), a concrete issues list, an overview, a Mermaid flow diagram, and a Mermaid sequence diagram. The scanned function defs are appended to the markdown. The tab renders that markdown in place, including the diagrams. Tap **Source** for the raw text. Keys stay on the phone. Tap **Save** to write `UNDERSTAND.md` in the repo root. If that file already exists, the tab loads it when you open the project.
+The phone scans the repo for function and method signatures, packs a file tree and a few key file heads, and asks the model selected on the Vibe tab for code ratings (bar + pie graphs at the top), a concrete issues list, an overview, a Mermaid flow diagram, and a Mermaid sequence diagram. The scanned function defs are appended to the markdown, and for Android repos an **Android permissions** section lists every `uses-permission` in the source manifests, flagging the ones users get asked about (camera, location, SMS, …) and special access (draw over apps, install apps, …). The tab renders that markdown in place, including the diagrams. Tap **Source** for the raw text. Keys stay on the phone. Tap **Save** to write `UNDERSTAND.md` in the repo root. If that file already exists, the tab loads it when you open the project.
 
 ## Vibe
 
@@ -173,6 +175,8 @@ On Console, type what you want and tap **Find**. AndVibe searches public reposit
 **Gradle (`gradlew`) projects** compile on the phone. AndVibe downloads Android platform 34 + build-tools data from Google, then fetches **OpenJDK 17 and aapt/aapt2** from Termux’s aarch64 packages, packs them into an **AndVibe Build Tools** companion APK, and prompts you to install it (Android 10+ only allows executing binaries from an APK’s `nativeLibraryDir`). Tap Build again after installing.
 
 A project **without** `gradlew` is packed on the phone. **Build APK** syntax-checks and tests the JavaScript, then writes a signed APK named Built app. The path is on the Build tab, under `Android/data/com.example.andvibe/files/apk/`. The first install asks you to allow AndVibe to install unknown apps. Tap **Install** again after that.
+
+After a build, the Build log lists the APK's permissions from its **merged** manifest. That includes permissions libraries add on their own, which the source manifest doesn't show. Sensitive ones are marked `[runtime]` or `[special]`, and the build notification gives a one-line summary.
 
 Set **Prefer remote builder** to `true` under Console → Variables (and a builder URL + token) to use the remote builder instead of local. There is no automatic fallback when local fails.
 
