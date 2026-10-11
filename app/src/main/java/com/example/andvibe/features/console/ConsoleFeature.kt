@@ -115,7 +115,7 @@ class ConsoleFeature(
     }
 }
 
-/** Pure command dispatch — no global app state (DESIGN.md Phase 4 Console). */
+/** Pure command dispatch — no global app state. */
 object ConsoleCommands {
     private const val HELP = """
 AndVibe

@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Console tape buffer with cheap observation (DESIGN.md §3.4). */
+/** Console tape buffer with cheap observation. */
 class ConsoleLog {
     private val buffer = BoundedLog()
     private val _revision = MutableStateFlow(0L)

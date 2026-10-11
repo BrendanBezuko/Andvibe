@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * Owns the open project: the repos dir, the working directory, and the open file.
- * The single owner for project/workspace scoping (DESIGN.md §3.4).
+ * The single owner for project/workspace scoping.
  */
 class ProjectSession internal constructor(
     val reposDir: File,

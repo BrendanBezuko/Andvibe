@@ -2,7 +2,7 @@
 
 The visual contract for the rebuild. The current app's look is a keeper ("classic GitHub vibe
 but also pure Android… console like a trading platform"), so this documents what exists today
-as named tokens and rules. `DESIGN.md` governs code structure; this file governs pixels.
+as named tokens and rules. This file governs pixels.
 Companion: `USER.md` principle 4 (blocked buttons + busy bar, nothing flashy).
 
 ## Design intent

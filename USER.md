@@ -1,8 +1,7 @@
 # AndVibe — User Stories
 
 Distilled from the project's development chat history (50 Cursor sessions, Oct 1–5, 2026).
-This is the product's source of truth for _what the user wants and why_; `DESIGN.md` is how
-the code should be shaped to deliver it. Stories keep the original specifics (icons, colors,
+This is the product's source of truth for _what the user wants and why_. Stories keep the original specifics (icons, colors,
 layouts) where they were stated — those are requirements, not decoration.
 
 ## Vision

@@ -8,8 +8,8 @@ import android.content.Context
 import java.io.File
 
 /**
- * Single build path for the Build tab and the agent's build tool
- * (DESIGN.md §3.7 / Phase 3). Mutual exclusion is Res.BUILD — claimed by
+ * Single build path for the Build tab and the agent's build tool.
+ * Mutual exclusion is Res.BUILD — claimed by
  * TaskRunner.launch for the tab, or nest-claimed here when the agent calls in.
  *
  * Gradle projects: local toolchain by default. Remote (BYOC) only when

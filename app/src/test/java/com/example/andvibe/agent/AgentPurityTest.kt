@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** agent/ must not reference deleted global state or the old UI listener bus (DESIGN.md Phase 3/5). */
+/** agent/ must not reference deleted global state or the old UI listener bus. */
 class AgentPurityTest {
     @Test
     fun agentHasNoLegacyGlobals() {

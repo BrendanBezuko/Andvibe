@@ -30,7 +30,7 @@ data class AgentRequest(
 )
 
 /**
- * Plan then execute phases as a suspend function (DESIGN.md §3.7).
+ * Plan then execute phases as a suspend function.
  * Cancellation: [AgentRequest.stop] plus [ensureActive] at the same points the
  * old stop flag was checked. Blocking model HTTP is not interrupted mid-call.
  */

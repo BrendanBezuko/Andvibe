@@ -29,7 +29,7 @@ object Res {
 }
 
 /**
- * The one job system (DESIGN.md §3.3): tracks running work, enforces resource
+ * The one job system: tracks running work, enforces resource
  * exclusion, and drives the foreground service, busy UI, and done notifications.
  * A scheduler, not a domain object — it does not know what "build" means.
  * Replaces Jobs and the old per-flag busy booleans.

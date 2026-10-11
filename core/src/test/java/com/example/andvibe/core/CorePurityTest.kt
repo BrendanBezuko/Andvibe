@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** core/ must stay pure JVM: no android.* or androidx.* imports (DESIGN.md §3.1). */
+/** core/ must stay pure JVM: no android.* or androidx.* imports. */
 class CorePurityTest {
     @Test
     fun coreHasNoAndroidImports() {

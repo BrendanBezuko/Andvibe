@@ -9,7 +9,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Named tools with individual execute bodies (DESIGN.md §3.7).
+ * Named tools with individual execute bodies.
  * Replaces the monolithic AgentTools dispatch. No global app state or UI listener bus.
  */
 class ToolRegistry(

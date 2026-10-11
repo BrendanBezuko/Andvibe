@@ -4,7 +4,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 
-/** Buffered one-shot effects (DESIGN.md §3.4) — delivered exactly once when collected. */
+/** Buffered one-shot effects — delivered exactly once when collected. */
 class FeatureEffects<E> {
     private val channel = Channel<E>(Channel.BUFFERED)
     val events: Flow<E> = channel.receiveAsFlow()

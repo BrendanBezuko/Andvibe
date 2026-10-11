@@ -16,7 +16,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * DESIGN.md §9: launch, visit each tab, run console `help`.
+ * Smoke test: launch, visit each tab, run console `help`.
  */
 @RunWith(AndroidJUnit4::class)
 @LargeTest
