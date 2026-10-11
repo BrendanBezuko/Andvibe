@@ -34,7 +34,8 @@ object AiClient {
         key: String,
         model: String,
         base: String,
-        history: ArrayDeque<Pair<String, String>>
+        history: ArrayDeque<Pair<String, String>>,
+        apiStyle: ApiStyle = ApiStyle.from(provider),
     ): EditResult {
         if (instruction.length > 16_000) error("prompt is too long")
         if (key.isBlank()) error("add an API key in Settings")
@@ -47,9 +48,10 @@ object AiClient {
         }
         val prompt = buildPrompt(root, cwd, open, instruction)
         val messages = sanitize(history.toList() + ("user" to prompt))
-        val reply = when (provider) {
-            Provider.ANTHROPIC -> anthropic(baseUrl, key, model, messages)
-            Provider.GEMINI -> gemini(baseUrl, key, model, messages)
+        val style = effectiveStyle(provider, apiStyle)
+        val reply = when {
+            provider == Provider.GEMINI -> gemini(baseUrl, key, model, messages)
+            style == ApiStyle.ANTHROPIC -> anthropic(baseUrl, key, model, messages)
             else -> openaiCompatible(baseUrl, key, model, messages, headers = extraHeaders(provider))
         }
         val charged = if (reply.input == 0L && reply.output == 0L) {
@@ -83,7 +85,8 @@ object AiClient {
         key: String,
         model: String,
         base: String,
-        maxUser: Int = 16_000
+        maxUser: Int = 16_000,
+        apiStyle: ApiStyle = ApiStyle.from(provider),
     ): String {
         if (user.length > maxUser) error("prompt is too long")
         if (key.isBlank()) error("add an API key in Settings")
@@ -95,9 +98,10 @@ object AiClient {
             error("base URL must start with https://")
         }
         val messages = listOf("user" to user)
-        val reply = when (provider) {
-            Provider.ANTHROPIC -> anthropic(baseUrl, key, model, messages, system)
-            Provider.GEMINI -> gemini(baseUrl, key, model, messages, system)
+        val style = effectiveStyle(provider, apiStyle)
+        val reply = when {
+            provider == Provider.GEMINI -> gemini(baseUrl, key, model, messages, system)
+            style == ApiStyle.ANTHROPIC -> anthropic(baseUrl, key, model, messages, system)
             else -> openaiCompatible(baseUrl, key, model, messages, system, extraHeaders(provider))
         }
         val charged = if (reply.input == 0L && reply.output == 0L) {
@@ -118,6 +122,7 @@ object AiClient {
         provider: Provider,
         key: String,
         base: String,
+        apiStyle: ApiStyle = ApiStyle.from(provider),
     ): String {
         if (!audio.isFile || audio.length() == 0L) error("recording is empty")
         if (audio.length() > 24L * 1024 * 1024) error("recording is too large (max 24MB)")
@@ -127,11 +132,12 @@ object AiClient {
         if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
             error("base URL must start with https://")
         }
-        val text = when (provider) {
-            Provider.ANTHROPIC -> error(
-                "Board voice needs OpenAI, OpenRouter, Gemini, Grok, or Custom for transcription"
+        val style = effectiveStyle(provider, apiStyle)
+        val text = when {
+            provider == Provider.GEMINI -> geminiTranscribe(baseUrl, key, audio)
+            style == ApiStyle.ANTHROPIC -> error(
+                "Board voice needs OpenAI, OpenRouter, Gemini, Grok, or an OpenAI-compatible Custom server for transcription"
             )
-            Provider.GEMINI -> geminiTranscribe(baseUrl, key, audio)
             else -> openaiTranscribe(baseUrl, key, provider, audio)
         }.trim()
         if (text.isEmpty()) error("transcription was empty")
@@ -145,7 +151,8 @@ object AiClient {
         provider: Provider,
         key: String,
         model: String,
-        base: String
+        base: String,
+        apiStyle: ApiStyle = ApiStyle.from(provider),
     ): String {
         if (user.length > 16_000) error("prompt is too long")
         if (key.isBlank()) error("add an API key in Settings")
@@ -153,9 +160,10 @@ object AiClient {
         val baseUrl = base.ifBlank { provider.defaultBase }
         if (baseUrl.isBlank()) error("set a base URL")
         val messages = listOf("user" to user)
-        val reply = when (provider) {
-            Provider.ANTHROPIC -> anthropic(baseUrl, key, model, messages, system, search = true)
-            Provider.GEMINI -> gemini(baseUrl, key, model, messages, system, search = true)
+        val style = effectiveStyle(provider, apiStyle)
+        val reply = when {
+            provider == Provider.GEMINI -> gemini(baseUrl, key, model, messages, system, search = true)
+            style == ApiStyle.ANTHROPIC -> anthropic(baseUrl, key, model, messages, system, search = true)
             else -> try {
                 responses(baseUrl, key, model, messages, system, extraHeaders(provider), search = true)
             } catch (e: IllegalStateException) {
@@ -630,6 +638,12 @@ object AiClient {
             trimmed.endsWith("/v1") -> "$trimmed/messages"
             else -> "$trimmed/v1/messages"
         }
+    }
+
+    internal fun effectiveStyle(provider: Provider, apiStyle: ApiStyle): ApiStyle {
+        if (provider == Provider.GEMINI) return ApiStyle.OPENAI // unused; Gemini has its own path
+        if (provider == Provider.ANTHROPIC) return ApiStyle.ANTHROPIC
+        return apiStyle
     }
 
     internal fun geminiUrl(base: String, model: String): String {

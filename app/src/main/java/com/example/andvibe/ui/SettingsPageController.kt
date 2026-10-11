@@ -40,6 +40,7 @@ class SettingsPageController(
     private val syncVaultKey: (Provider, String) -> Unit,
 ) {
     private val apiKeys = linkedMapOf<Provider, EditText>()
+    private val customApiKeys = linkedMapOf<String, EditText>()
     private val promptFields = linkedMapOf<PromptStore.Kind, EditText>()
 
     var isOpen: Boolean = false
@@ -70,7 +71,7 @@ class SettingsPageController(
             } else {
                 InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             }
-            for (field in apiKeys.values) {
+            for (field in apiKeys.values + customApiKeys.values) {
                 field.inputType = type
                 field.setSelection(field.text?.length ?: 0)
             }
@@ -116,16 +117,31 @@ class SettingsPageController(
     }
 
     fun saveApiKeys(announce: Boolean) {
-        if (apiKeys.isEmpty()) return
+        if (apiKeys.isEmpty() && customApiKeys.isEmpty()) return
         for ((provider, field) in apiKeys) {
+            if (provider == Provider.CUSTOM) continue
             val key = field.text?.toString()?.trim().orEmpty()
             secrets.saveKey(provider, key)
             syncVaultKey(provider, key)
         }
+        for ((id, field) in customApiKeys) {
+            val server = secrets.customServers().firstOrNull { it.id == id } ?: continue
+            secrets.upsertCustomServer(
+                server.copy(key = field.text?.toString()?.trim().orEmpty()),
+                select = false,
+            )
+        }
+        val activeKey = secrets.get(Provider.CUSTOM, "key", "")
+        syncVaultKey(Provider.CUSTOM, activeKey)
         if (announce) page.keyNote.text = "Saved."
     }
 
     fun setApiKeyField(provider: Provider, key: String) {
+        if (provider == Provider.CUSTOM) {
+            val id = secrets.selectedCustomId()
+            customApiKeys[id]?.setText(key)
+            return
+        }
         apiKeys[provider]?.setText(key)
     }
 
@@ -145,48 +161,87 @@ class SettingsPageController(
 
     private fun buildApiKeyFields() {
         val parent = page.apiKeyList
-        if (parent.childCount > 0) return
+        parent.removeAllViews()
+        apiKeys.clear()
+        customApiKeys.clear()
         for (provider in Provider.entries) {
-            val key = "${provider.id}_key"
-            val label = TextView(activity).apply {
-                text = key
-                setTextColor(color(R.color.muted))
-                textSize = 12f
-                typeface = Typeface.MONOSPACE
-            }
-            val labelParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-            labelParams.topMargin = dp(12)
-            parent.addView(label, labelParams)
-
-            val field = EditText(activity).apply {
-                hint = "${provider.label} API key"
-                setHintTextColor(color(R.color.muted))
-                setTextColor(color(R.color.ink))
-                setBackgroundResource(R.drawable.bg_field)
-                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                maxLines = 1
-                setPadding(dp(10), dp(10), dp(10), dp(10))
-                textSize = 14f
-                setText(secrets.get(provider, "key", ""))
-            }
-            apiKeys[provider] = field
-            val params = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-            params.topMargin = dp(4)
-            parent.addView(field, params)
+            if (provider == Provider.CUSTOM) continue
+            addKeyField(
+                parent,
+                key = "${provider.id}_key",
+                hint = "${provider.label} API key",
+                value = secrets.get(provider, "key", ""),
+            ) { field -> apiKeys[provider] = field }
+        }
+        val note = TextView(activity).apply {
+            text = "Custom servers (add/edit on Vibe → Model)"
+            setTextColor(color(R.color.muted))
+            textSize = 12f
+        }
+        val noteParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        )
+        noteParams.topMargin = dp(16)
+        parent.addView(note, noteParams)
+        secrets.ensureCustomServer()
+        for (server in secrets.customServers()) {
+            addKeyField(
+                parent,
+                key = "custom:${server.name}_key",
+                hint = "${server.name} API key",
+                value = server.key,
+            ) { field -> customApiKeys[server.id] = field }
         }
     }
 
-    private fun loadApiKeys() {
-        for ((provider, field) in apiKeys) {
-            field.setText(secrets.get(provider, "key", ""))
+    private fun addKeyField(
+        parent: LinearLayout,
+        key: String,
+        hint: String,
+        value: String,
+        storeField: (EditText) -> Unit,
+    ) {
+        val label = TextView(activity).apply {
+            text = key
+            setTextColor(color(R.color.muted))
+            textSize = 12f
+            typeface = Typeface.MONOSPACE
         }
+        val labelParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        )
+        labelParams.topMargin = dp(12)
+        parent.addView(label, labelParams)
+
+        val field = EditText(activity).apply {
+            this.hint = hint
+            setHintTextColor(color(R.color.muted))
+            setTextColor(color(R.color.ink))
+            setBackgroundResource(R.drawable.bg_field)
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+            inputType = if (page.showApiKeys.isChecked) {
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            } else {
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            maxLines = 1
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            textSize = 14f
+            setText(value)
+        }
+        storeField(field)
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        )
+        params.topMargin = dp(4)
+        parent.addView(field, params)
+    }
+
+    private fun loadApiKeys() {
+        buildApiKeyFields()
         page.keyNote.text = ""
     }
 

@@ -18,8 +18,10 @@ import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.andvibe.ApiStyle
 import com.example.andvibe.BusyUi
 import com.example.andvibe.ChatStore
+import com.example.andvibe.CustomServer
 import com.example.andvibe.ProjectMentions
 import com.example.andvibe.Provider
 import com.example.andvibe.R
@@ -66,6 +68,8 @@ class VibePageController(
     private val mentionNames = mutableListOf<String>()
     private var provider = Provider.OPENAI
     private var spinnerReady = false
+    private var customSpinnerReady = false
+    private var styleSpinnerReady = false
 
     private val mentionWatcher = object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -79,6 +83,7 @@ class VibePageController(
     }
 
     fun start() {
+        setupCustomControls()
         setupProvider()
         page.autoTest.isChecked = store.autoTest()
         page.autoTest.setOnCheckedChangeListener { _, checked -> store.setAutoTest(checked) }
@@ -231,11 +236,13 @@ class VibePageController(
 
     private fun vibeCreds(): VibeFeature.Creds {
         val p = provider
+        if (p == Provider.CUSTOM) persistCustomFields()
         return VibeFeature.Creds(
             p,
             store.get(p, "key", ""),
             page.model.text?.toString()?.trim().orEmpty().ifBlank { p.defaultModel },
             page.baseUrl.text?.toString()?.trim().orEmpty().ifBlank { p.defaultBase },
+            store.apiStyle(p),
         )
     }
 
@@ -249,16 +256,122 @@ class VibePageController(
     }
 
     private fun loadProvider(provider: Provider) {
+        if (provider == Provider.CUSTOM) {
+            store.ensureCustomServer()
+            showCustomControls(true)
+            refreshCustomServerSpinner()
+            loadActiveCustom()
+            return
+        }
+        showCustomControls(false)
         page.model.setText(store.get(provider, "model", provider.defaultModel))
         page.baseUrl.setText(store.get(provider, "base", provider.defaultBase))
     }
 
     private fun saveProvider(provider: Provider) {
+        if (provider == Provider.CUSTOM) {
+            persistCustomFields()
+            store.saveChoice(
+                provider,
+                page.model.text?.toString()?.trim().orEmpty(),
+                page.baseUrl.text?.toString()?.trim().orEmpty(),
+            )
+            return
+        }
         store.saveChoice(
             provider,
             page.model.text?.toString()?.trim().orEmpty(),
             page.baseUrl.text?.toString()?.trim().orEmpty(),
         )
+    }
+
+    private fun setupCustomControls() {
+        val styleLabels = ApiStyle.entries.map { it.label }
+        val styleAdapter = ArrayAdapter(activity, R.layout.row_spinner, styleLabels)
+        styleAdapter.setDropDownViewResource(R.layout.row_spinner)
+        page.apiStyle.adapter = styleAdapter
+        page.apiStyle.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!styleSpinnerReady || provider != Provider.CUSTOM) return
+                persistCustomFields()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        page.customServer.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!customSpinnerReady || provider != Provider.CUSTOM) return
+                persistCustomFields()
+                val servers = store.customServers()
+                val next = servers.getOrNull(position) ?: return
+                if (next.id == store.selectedCustomId()) return
+                store.selectCustomServer(next.id)
+                loadActiveCustom()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        page.customAdd.setOnClickListener {
+            if (provider != Provider.CUSTOM) return@setOnClickListener
+            persistCustomFields()
+            val n = store.customServers().size + 1
+            val created = CustomServer.new(name = "Custom $n")
+            store.upsertCustomServer(created, select = true)
+            refreshCustomServerSpinner()
+            loadActiveCustom()
+        }
+        page.customDelete.setOnClickListener {
+            if (provider != Provider.CUSTOM) return@setOnClickListener
+            val active = store.activeCustomServer() ?: return@setOnClickListener
+            if (!store.deleteCustomServer(active.id)) {
+                Toast.makeText(activity, "Keep at least one custom server", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            refreshCustomServerSpinner()
+            loadActiveCustom()
+        }
+    }
+
+    private fun showCustomControls(visible: Boolean) {
+        page.customServerPane.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+
+    private fun refreshCustomServerSpinner() {
+        val servers = store.customServers()
+        val labels = servers.map { it.name.ifBlank { "Custom" } }
+        val adapter = ArrayAdapter(activity, R.layout.row_spinner, labels)
+        adapter.setDropDownViewResource(R.layout.row_spinner)
+        customSpinnerReady = false
+        page.customServer.adapter = adapter
+        val index = servers.indexOfFirst { it.id == store.selectedCustomId() }.let { if (it < 0) 0 else it }
+        if (servers.isNotEmpty()) page.customServer.setSelection(index)
+        customSpinnerReady = true
+    }
+
+    private fun loadActiveCustom() {
+        val active = store.ensureCustomServer()
+        page.customName.setText(active.name)
+        page.model.setText(active.model)
+        page.baseUrl.setText(active.base)
+        styleSpinnerReady = false
+        page.apiStyle.setSelection(ApiStyle.entries.indexOf(active.style).coerceAtLeast(0))
+        styleSpinnerReady = true
+    }
+
+    private fun persistCustomFields() {
+        val active = store.activeCustomServer() ?: store.ensureCustomServer()
+        val style = ApiStyle.entries.getOrElse(page.apiStyle.selectedItemPosition) { ApiStyle.OPENAI }
+        store.upsertCustomServer(
+            active.copy(
+                name = page.customName.text?.toString()?.trim().orEmpty().ifBlank { active.name },
+                model = page.model.text?.toString()?.trim().orEmpty(),
+                base = page.baseUrl.text?.toString()?.trim().orEmpty(),
+                style = style,
+                key = active.key,
+            ),
+            select = true,
+        )
+        refreshCustomServerSpinner()
     }
 
     private fun showVibeTab(index: Int) {

@@ -29,7 +29,13 @@ class GitFeature(
     private val log: (String) -> Unit,
     private val onFilesChanged: () -> Unit,
 ) {
-    data class Creds(val provider: Provider, val key: String, val model: String, val base: String)
+    data class Creds(
+        val provider: Provider,
+        val key: String,
+        val model: String,
+        val base: String,
+        val apiStyle: com.example.andvibe.ApiStyle = com.example.andvibe.ApiStyle.from(provider),
+    )
 
     data class State(
         val busy: Boolean = false,
@@ -324,6 +330,7 @@ class GitFeature(
                     creds.key,
                     creds.model,
                     creds.base,
+                    apiStyle = creds.apiStyle,
                 )
                 raw.lineSequence().map { it.trim().trim('"') }.firstOrNull { it.isNotEmpty() }.orEmpty()
                     .let { if (it.length <= 72) it else it.take(69).trimEnd() + "..." }

@@ -30,7 +30,13 @@ class SearchFeature(
     private val onProjectChanged: () -> Unit,
     private val onFilesChanged: () -> Unit,
 ) {
-    data class Creds(val provider: Provider, val key: String, val model: String, val base: String)
+    data class Creds(
+        val provider: Provider,
+        val key: String,
+        val model: String,
+        val base: String,
+        val apiStyle: com.example.andvibe.ApiStyle = com.example.andvibe.ApiStyle.from(provider),
+    )
 
     data class State(
         val newsTab: Boolean = false,
@@ -118,6 +124,7 @@ class SearchFeature(
                     creds.model,
                     creds.base,
                     FossFeed.matching(app, query),
+                    creds.apiStyle,
                 )
             } catch (t: Throwable) {
                 DebugLog.step("find", "fail ${t.javaClass.simpleName}: ${t.message}")

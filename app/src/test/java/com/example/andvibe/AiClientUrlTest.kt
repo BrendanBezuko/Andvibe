@@ -83,4 +83,14 @@ class AiClientUrlTest {
         assertTrue(AiClient.extraHeaders(Provider.OPENAI).isEmpty())
         assertEquals(mapOf("X-Title" to "AndVibe"), AiClient.extraHeaders(Provider.OPENROUTER))
     }
+
+    @Test
+    fun effectiveStyleHonorsCustomAnthropic() {
+        assertEquals(ApiStyle.ANTHROPIC, AiClient.effectiveStyle(Provider.ANTHROPIC, ApiStyle.OPENAI))
+        assertEquals(
+            ApiStyle.ANTHROPIC,
+            AiClient.effectiveStyle(Provider.CUSTOM, ApiStyle.ANTHROPIC),
+        )
+        assertEquals(ApiStyle.OPENAI, AiClient.effectiveStyle(Provider.CUSTOM, ApiStyle.OPENAI))
+    }
 }

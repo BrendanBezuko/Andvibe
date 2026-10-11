@@ -26,7 +26,13 @@ class BoardFeature(
     private val session: ProjectSession,
     private val log: (String) -> Unit,
 ) {
-    data class Creds(val provider: Provider, val key: String, val model: String, val base: String)
+    data class Creds(
+        val provider: Provider,
+        val key: String,
+        val model: String,
+        val base: String,
+        val apiStyle: com.example.andvibe.ApiStyle = com.example.andvibe.ApiStyle.from(provider),
+    )
 
     data class State(
         val cards: List<WorkspaceStore.Card> = emptyList(),
@@ -181,7 +187,13 @@ class BoardFeature(
         val task = tasks.launch("Board voice", Tab.BOARD, setOf(Res.BOARD), dispatchers.io, track = true) {
             try {
                 _state.update { it.copy(status = "Transcribing…", partial = "") }
-                val transcript = AiClient.transcribe(audio, creds.provider, creds.key, creds.base)
+                val transcript = AiClient.transcribe(
+                    audio,
+                    creds.provider,
+                    creds.key,
+                    creds.base,
+                    creds.apiStyle,
+                )
                 log("Board voice transcript: ${transcript.take(160)}")
                 _state.update {
                     it.copy(
@@ -249,6 +261,7 @@ class BoardFeature(
             creds.model,
             creds.base,
             maxUser = 40_000,
+            apiStyle = creds.apiStyle,
         )
         return BoardDraft.parse(raw)
     }

@@ -34,7 +34,13 @@ class BuildFeature(
     private val onBuildChanged: () -> Unit,
     private val onFilesChanged: () -> Unit,
 ) {
-    data class Creds(val provider: Provider, val key: String, val model: String, val base: String)
+    data class Creds(
+        val provider: Provider,
+        val key: String,
+        val model: String,
+        val base: String,
+        val apiStyle: com.example.andvibe.ApiStyle = com.example.andvibe.ApiStyle.from(provider),
+    )
 
     data class State(
         val logText: String = "",
@@ -179,7 +185,16 @@ class BuildFeature(
                     $tail
                 """.trimIndent()
                 val edit = AiClient.edit(
-                    root, cwd, open, instruction, creds.provider, creds.key, creds.model, creds.base, vibeHistory()
+                    root,
+                    cwd,
+                    open,
+                    instruction,
+                    creds.provider,
+                    creds.key,
+                    creds.model,
+                    creds.base,
+                    vibeHistory(),
+                    creds.apiStyle,
                 )
                 note(edit.report, mirrorConsole = true)
                 if (edit.written.isNotEmpty()) {

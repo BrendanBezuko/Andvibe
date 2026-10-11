@@ -21,7 +21,13 @@ class UnderstandFeature(
     private val dispatchers: AppDispatchers,
     private val log: (String) -> Unit,
 ) {
-    data class Creds(val provider: Provider, val key: String, val model: String, val base: String)
+    data class Creds(
+        val provider: Provider,
+        val key: String,
+        val model: String,
+        val base: String,
+        val apiStyle: com.example.andvibe.ApiStyle = com.example.andvibe.ApiStyle.from(provider),
+    )
 
     data class State(
         val repo: File? = null,
@@ -123,10 +129,12 @@ class UnderstandFeature(
                     creds.model,
                     creds.base,
                     stop = { stopFlag.get() },
-                ) { line ->
-                    _state.update { s -> s.copy(statusNote = line) }
-                    DebugLog.step("understand", line)
-                }
+                    onStep = { line ->
+                        _state.update { s -> s.copy(statusNote = line) }
+                        DebugLog.step("understand", line)
+                    },
+                    apiStyle = creds.apiStyle,
+                )
                 _state.update {
                     it.copy(
                         markdown = result.markdown,

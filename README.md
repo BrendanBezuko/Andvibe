@@ -148,6 +148,8 @@ The phone scans the repo for function and method signatures, packs a file tree a
 
 Pick OpenAI, Anthropic, Gemini, Grok, OpenRouter, or Custom. The model and base URL start filled in and can be changed. API keys are in Settings. OpenRouter model ids include the vendor, like `anthropic/claude-sonnet-5`.
 
+**Custom** supports multiple named servers. On Vibe → Model, pick Custom, then Add servers and set each one’s name, model, base URL, and API style (`OpenAI-compatible` or `Anthropic Messages`). Use Anthropic Messages for a local Anthropic-compatible proxy such as claude-proxy (`POST /v1/messages`, model `claude-code`, base `http://<lan-host>:8787`). Put each server’s API key in Settings. Keys and servers stay on the phone.
+
 Every send runs as an agent on the phone in two phases. First a short **plan** phase with read-only tools (list, read, grep, git status, git diff), at most 12 steps. Then an **execute** phase with the full tools, at most 40 steps, following that plan. The phone runs each tool on the open repo and sends results back until the model finishes. The write tools are find-and-replace edit, write, delete, the JavaScript checks and tests, and a **build** tool when the repo has `gradlew` (local toolchain first; remote builder only if configured). Each step shows in the chat. Send turns into Stop while the agent works; Stop takes effect after the current model call returns. If the repo has `AGENTS.md`, `CLAUDE.md`, or `.cursorrules`, the agent reads it first. The model needs tool calling.
 
 | Provider   | Default model               | Base URL                                           |

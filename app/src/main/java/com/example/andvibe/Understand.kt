@@ -52,7 +52,8 @@ object Understand {
         model: String,
         base: String,
         stop: () -> Boolean,
-        onStep: (String) -> Unit
+        onStep: (String) -> Unit,
+        apiStyle: ApiStyle = ApiStyle.from(provider),
     ): UnderstandResult {
         if (stop()) throw CancellationException("stopped")
         onStep("Scanning source for function defs")
@@ -62,7 +63,16 @@ object Understand {
         val packed = pack(root, focus, defs)
         if (stop()) throw CancellationException("stopped")
         onStep("Asking ${provider.label} for ratings and diagrams")
-        val prose = AiClient.complete(systemPrompt, packed, provider, key, model, base, maxUser = 80_000)
+        val prose = AiClient.complete(
+            systemPrompt,
+            packed,
+            provider,
+            key,
+            model,
+            base,
+            maxUser = 80_000,
+            apiStyle = apiStyle,
+        )
         if (stop()) throw CancellationException("stopped")
         val markdown = assemble(root.name, prose, defs, focus)
         return UnderstandResult(markdown, defs.size, defs.map { it.path }.toSet().size)

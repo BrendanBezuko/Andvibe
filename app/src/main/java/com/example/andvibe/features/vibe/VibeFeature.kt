@@ -31,7 +31,13 @@ class VibeFeature(
     private val gitBusy: () -> Boolean,
     private val refreshGitSnapshot: () -> Unit,
 ) {
-    data class Creds(val provider: Provider, val key: String, val model: String, val base: String)
+    data class Creds(
+        val provider: Provider,
+        val key: String,
+        val model: String,
+        val base: String,
+        val apiStyle: com.example.andvibe.ApiStyle = com.example.andvibe.ApiStyle.from(provider),
+    )
 
     data class SendContext(
         val startRoot: File?,
@@ -195,6 +201,7 @@ class VibeFeature(
                     liveRoot = root
                     _state.update { s -> s.copy(runRepo = root) }
                 },
+                apiStyle = creds.apiStyle,
             ),
             onEvent = { event -> onAgentEvent(event, trimmed, ctx.startRoot) { liveRoot } },
         )

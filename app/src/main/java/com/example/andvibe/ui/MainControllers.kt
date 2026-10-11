@@ -165,6 +165,7 @@ class MainControllers(
                     store.get(provider, "key", ""),
                     store.get(provider, "model", provider.defaultModel),
                     store.get(provider, "base", provider.defaultBase),
+                    store.apiStyle(provider),
                 )
             },
             saveProvider = { vibe.saveCurrentProvider() },
@@ -233,6 +234,7 @@ class MainControllers(
                     store.get(provider, "key", ""),
                     store.get(provider, "model", provider.defaultModel),
                     store.get(provider, "base", provider.defaultBase),
+                    store.apiStyle(provider),
                 )
             },
             onGoToFiles = {
@@ -344,6 +346,7 @@ class MainControllers(
                     store.get(provider, "base", provider.defaultBase).ifBlank {
                         binding.vibePage.baseUrl.text?.toString()?.trim().orEmpty().ifBlank { provider.defaultBase }
                     },
+                    store.apiStyle(provider),
                 )
             },
             onSaved = {
@@ -370,6 +373,7 @@ class MainControllers(
                     store.get(provider, "key", ""),
                     store.get(provider, "model", provider.defaultModel),
                     store.get(provider, "base", provider.defaultBase),
+                    store.apiStyle(provider),
                 )
             },
             saveProvider = { vibe.saveCurrentProvider() },
@@ -398,6 +402,7 @@ class MainControllers(
                     store.get(provider, "key", ""),
                     store.get(provider, "model", provider.defaultModel),
                     store.get(provider, "base", provider.defaultBase),
+                    store.apiStyle(provider),
                 )
             },
             currentProvider = { vibe.currentProvider() },

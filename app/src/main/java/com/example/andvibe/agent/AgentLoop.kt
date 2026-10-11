@@ -1,6 +1,7 @@
 package com.example.andvibe.agent
 
 import com.example.andvibe.AiClient
+import com.example.andvibe.ApiStyle
 import com.example.andvibe.DebugLog
 import com.example.andvibe.ProjectMentions
 import com.example.andvibe.PromptStore
@@ -25,6 +26,7 @@ data class AgentRequest(
     val workspaceRepos: List<File>,
     val stop: AtomicBoolean,
     val http: HttpPost? = null,
+    val apiStyle: ApiStyle = ApiStyle.from(provider),
 )
 
 /**
@@ -172,6 +174,7 @@ object AgentLoop {
             request.model,
             baseUrl,
             request.http ?: HttpPost { url, headers, body -> AiClient.post(url, headers, body) },
+            request.apiStyle,
         )
     }
 

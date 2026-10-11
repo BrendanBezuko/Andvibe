@@ -75,6 +75,7 @@ class AgentRuntime(
                 workspaceRepos = request.workspaceRepos,
                 stop = stop,
                 http = request.http,
+                apiStyle = request.apiStyle,
             )
             var title = "Agent error"
             try {
@@ -154,4 +155,5 @@ data class AgentStart(
     val workspaceRepos: List<File>,
     val onRootChanged: (File) -> Unit = {},
     val http: HttpPost? = null,
+    val apiStyle: com.example.andvibe.ApiStyle = com.example.andvibe.ApiStyle.from(provider),
 )

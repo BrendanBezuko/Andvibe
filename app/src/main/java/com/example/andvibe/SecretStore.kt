@@ -21,8 +21,30 @@ class SecretStore(context: Context) {
     }
 
     fun get(provider: Provider, field: String, default: String): String {
+        if (provider == Provider.CUSTOM) {
+            migrateLegacyCustom()
+            val active = activeCustomServer()
+            return when (field) {
+                "key" -> active?.key ?: default
+                "model" -> active?.model?.ifBlank { default } ?: default
+                "base" -> active?.base?.ifBlank { default } ?: default
+                "style" -> active?.style?.id ?: default
+                else -> {
+                    val key = "${provider.id}_$field"
+                    if (prefs.contains(key)) prefs.getString(key, default) ?: default else default
+                }
+            }
+        }
         val key = "${provider.id}_$field"
         return if (prefs.contains(key)) prefs.getString(key, default) ?: default else default
+    }
+
+    fun apiStyle(provider: Provider): ApiStyle {
+        if (provider == Provider.CUSTOM) {
+            migrateLegacyCustom()
+            return activeCustomServer()?.style ?: ApiStyle.OPENAI
+        }
+        return ApiStyle.from(provider)
     }
 
     fun save(provider: Provider, apiKey: String, model: String, base: String) {
@@ -30,6 +52,18 @@ class SecretStore(context: Context) {
     }
 
     fun saveChoice(provider: Provider, model: String, base: String) {
+        if (provider == Provider.CUSTOM) {
+            migrateLegacyCustom()
+            val active = activeCustomServer()
+            if (active != null) {
+                upsertCustomServer(active.copy(model = model, base = base))
+            } else {
+                val created = CustomServer.new(model = model, base = base)
+                saveCustomServers(listOf(created), selectedId = created.id)
+            }
+            prefs.edit().putString("provider", provider.id).apply()
+            return
+        }
         prefs.edit()
             .putString("${provider.id}_model", model)
             .putString("${provider.id}_base", base)
@@ -38,16 +72,137 @@ class SecretStore(context: Context) {
     }
 
     fun saveKey(provider: Provider, apiKey: String) {
+        if (provider == Provider.CUSTOM) {
+            migrateLegacyCustom()
+            val active = activeCustomServer()
+            if (active != null) {
+                upsertCustomServer(active.copy(key = apiKey))
+            } else {
+                val created = CustomServer.new(key = apiKey)
+                saveCustomServers(listOf(created), selectedId = created.id)
+            }
+            return
+        }
         prefs.edit().putString("${provider.id}_key", apiKey).commit()
     }
 
     fun saveProvider(provider: Provider, apiKey: String, model: String, base: String, select: Boolean) {
+        if (provider == Provider.CUSTOM) {
+            migrateLegacyCustom()
+            val active = activeCustomServer()
+            if (active != null) {
+                upsertCustomServer(active.copy(key = apiKey, model = model, base = base))
+            } else {
+                val created = CustomServer.new(key = apiKey, model = model, base = base)
+                saveCustomServers(listOf(created), selectedId = created.id)
+            }
+            if (select) prefs.edit().putString("provider", provider.id).apply()
+            return
+        }
         val edit = prefs.edit()
             .putString("${provider.id}_key", apiKey)
             .putString("${provider.id}_model", model)
             .putString("${provider.id}_base", base)
         if (select) edit.putString("provider", provider.id)
         edit.apply()
+    }
+
+    fun customServers(): List<CustomServer> {
+        migrateLegacyCustom()
+        return CustomServer.listFromJson(prefs.getString(CUSTOM_SERVERS, null))
+    }
+
+    fun selectedCustomId(): String {
+        migrateLegacyCustom()
+        return prefs.getString(CUSTOM_SELECTED, "") ?: ""
+    }
+
+    fun activeCustomServer(): CustomServer? {
+        val servers = customServers()
+        if (servers.isEmpty()) return null
+        val selected = selectedCustomId()
+        return servers.firstOrNull { it.id == selected } ?: servers.first()
+    }
+
+    fun selectCustomServer(id: String) {
+        migrateLegacyCustom()
+        val servers = customServers()
+        if (servers.none { it.id == id }) return
+        prefs.edit().putString(CUSTOM_SELECTED, id).apply()
+    }
+
+    fun saveCustomServers(servers: List<CustomServer>, selectedId: String? = null) {
+        val selected = selectedId
+            ?: selectedCustomId().takeIf { id -> servers.any { it.id == id } }
+            ?: servers.firstOrNull()?.id
+            ?: ""
+        prefs.edit()
+            .putString(CUSTOM_SERVERS, CustomServer.listToJson(servers))
+            .putString(CUSTOM_SELECTED, selected)
+            .apply()
+        // Keep legacy keys in sync for older console vault rows / debugging.
+        val active = servers.firstOrNull { it.id == selected } ?: servers.firstOrNull()
+        if (active != null) {
+            prefs.edit()
+                .putString("custom_key", active.key)
+                .putString("custom_model", active.model)
+                .putString("custom_base", active.base)
+                .putString("custom_style", active.style.id)
+                .apply()
+        }
+    }
+
+    fun upsertCustomServer(server: CustomServer, select: Boolean = true) {
+        migrateLegacyCustom()
+        val servers = customServers().toMutableList()
+        val index = servers.indexOfFirst { it.id == server.id }
+        if (index >= 0) servers[index] = server else servers.add(server)
+        saveCustomServers(servers, selectedId = if (select) server.id else selectedCustomId())
+    }
+
+    fun deleteCustomServer(id: String): Boolean {
+        migrateLegacyCustom()
+        val servers = customServers()
+        if (servers.size <= 1) return false
+        val next = servers.filterNot { it.id == id }
+        if (next.size == servers.size) return false
+        val selected = if (selectedCustomId() == id) next.first().id else selectedCustomId()
+        saveCustomServers(next, selectedId = selected)
+        return true
+    }
+
+    fun ensureCustomServer(): CustomServer {
+        migrateLegacyCustom()
+        activeCustomServer()?.let { return it }
+        val created = CustomServer.new(name = "Custom 1")
+        saveCustomServers(listOf(created), selectedId = created.id)
+        return created
+    }
+
+    /**
+     * One-time lift of flat custom_key/model/base (+ optional style) into the servers list.
+     */
+    private fun migrateLegacyCustom() {
+        if (prefs.getBoolean(CUSTOM_MIGRATED, false)) return
+        val existing = CustomServer.listFromJson(prefs.getString(CUSTOM_SERVERS, null))
+        if (existing.isNotEmpty()) {
+            prefs.edit().putBoolean(CUSTOM_MIGRATED, true).apply()
+            return
+        }
+        val key = prefs.getString("custom_key", "") ?: ""
+        val model = prefs.getString("custom_model", "") ?: ""
+        val base = prefs.getString("custom_base", "") ?: ""
+        val style = ApiStyle.fromId(prefs.getString("custom_style", null))
+        val server = if (key.isNotBlank() || model.isNotBlank() || base.isNotBlank()) {
+            CustomServer.new(name = "Custom 1", key = key, model = model, base = base, style = style)
+        } else {
+            CustomServer.new(name = "Custom 1")
+        }
+        prefs.edit()
+            .putString(CUSTOM_SERVERS, CustomServer.listToJson(listOf(server)))
+            .putString(CUSTOM_SELECTED, server.id)
+            .putBoolean(CUSTOM_MIGRATED, true)
+            .apply()
     }
 
     fun lastProvider(): String = prefs.getString("provider", Provider.OPENAI.id) ?: Provider.OPENAI.id
@@ -104,6 +259,9 @@ class SecretStore(context: Context) {
 
     companion object {
         private const val MIGRATED = "__migrated_from_esp"
+        private const val CUSTOM_SERVERS = "custom_servers"
+        private const val CUSTOM_SELECTED = "custom_selected"
+        private const val CUSTOM_MIGRATED = "custom_servers_migrated"
 
         /**
          * One-time copy from the deprecated EncryptedSharedPreferences file into KeystorePrefs.

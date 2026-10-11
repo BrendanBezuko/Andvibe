@@ -1,6 +1,7 @@
 package com.example.andvibe.agent
 
 import com.example.andvibe.AiClient
+import com.example.andvibe.ApiStyle
 import com.example.andvibe.Provider
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,16 +26,15 @@ object AgentModels {
         model: String,
         baseUrl: String,
         http: HttpPost = HttpPost { url, headers, body -> AiClient.post(url, headers, body) },
+        apiStyle: ApiStyle = ApiStyle.from(provider),
     ): AgentModel {
-        return when (provider) {
-            Provider.ANTHROPIC -> AnthropicModel(baseUrl, key, model, http)
-            Provider.GEMINI -> GeminiModel(baseUrl, key, model, http)
-            Provider.OPENAI -> ResponsesModel(baseUrl, key, model, http)
-            else -> if (baseUrl.contains("api.openai.com")) {
+        val style = AiClient.effectiveStyle(provider, apiStyle)
+        return when {
+            provider == Provider.GEMINI -> GeminiModel(baseUrl, key, model, http)
+            style == ApiStyle.ANTHROPIC -> AnthropicModel(baseUrl, key, model, http)
+            provider == Provider.OPENAI || baseUrl.contains("api.openai.com") ->
                 ResponsesModel(baseUrl, key, model, http)
-            } else {
-                OpenAiModel(baseUrl, key, model, provider, http)
-            }
+            else -> OpenAiModel(baseUrl, key, model, provider, http)
         }
     }
 }

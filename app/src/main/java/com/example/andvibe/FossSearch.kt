@@ -41,14 +41,15 @@ object FossSearch {
         key: String,
         model: String,
         base: String,
-        cached: List<RepoHit> = emptyList()
+        cached: List<RepoHit> = emptyList(),
+        apiStyle: ApiStyle = ApiStyle.from(provider),
     ): SearchResult {
         val asked = query.trim().replace(Regex("\\s+"), " ").take(160)
         if (asked.isBlank()) error("say what you want to find")
         val known = merge(cached, knownChannels(asked))
         if (key.isNotBlank() && model.isNotBlank()) {
             try {
-                val report = agent(asked, known, provider, key, model, base)
+                val report = agent(asked, known, provider, key, model, base, apiStyle)
                 val repos = merge(report.repos, known)
                 if (repos.isNotEmpty() || report.news.isNotEmpty()) {
                     return SearchResult(repos, report.news, report.brief, "Tap a repo to clone it. Tap a story to open it.")
@@ -80,7 +81,8 @@ object FossSearch {
         provider: Provider,
         key: String,
         model: String,
-        base: String
+        base: String,
+        apiStyle: ApiStyle,
     ): AgentReport {
         val catalog = if (known.isEmpty()) {
             "(none)"
@@ -96,7 +98,8 @@ object FossSearch {
             provider,
             key,
             model,
-            base
+            base,
+            apiStyle = apiStyle,
         )
         val json = JSONObject(extractJson(raw))
         val repos = mutableListOf<RepoHit>()
@@ -230,7 +233,8 @@ object FossSearch {
         provider: Provider,
         key: String,
         model: String,
-        base: String
+        base: String,
+        apiStyle: ApiStyle = ApiStyle.from(provider),
     ): SearchResult {
         val found = mutableListOf<RepoHit>()
         val problems = mutableListOf<String>()
@@ -259,7 +263,7 @@ object FossSearch {
             )
         }
         return try {
-            val ranked = rank(asked, hits, provider, key, model, base)
+            val ranked = rank(asked, hits, provider, key, model, base, apiStyle)
             if (ranked.isEmpty()) {
                 SearchResult(hits.take(6).map { it.copy(why = it.blurb) }, emptyList(), "", "Tap one to clone it.")
             } else {
@@ -281,7 +285,8 @@ object FossSearch {
         provider: Provider,
         key: String,
         model: String,
-        base: String
+        base: String,
+        apiStyle: ApiStyle,
     ): List<RepoHit> {
         val listed = hits.take(12)
         val catalog = listed.joinToString("\n") { hit ->
@@ -294,7 +299,8 @@ object FossSearch {
             provider,
             key,
             model,
-            base
+            base,
+            apiStyle = apiStyle,
         )
         val picks = JSONObject(extractJson(raw)).optJSONArray("picks") ?: return emptyList()
         val out = mutableListOf<RepoHit>()
