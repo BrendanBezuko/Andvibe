@@ -1,5 +1,7 @@
 package com.example.andvibe.features.build
 
+import com.example.andvibe.ApkPermissions
+import com.example.andvibe.core.AndroidPermissions
 import android.content.Context
 import com.example.andvibe.AiClient
 import com.example.andvibe.ApkLibrary
@@ -111,11 +113,18 @@ class BuildFeature(
                     nestClaim = false,
                     log = { line -> note(line, mirrorConsole) },
                 )
+                var summary = outcome.summary
                 if (outcome.apk != null) {
                     _state.update { it.copy(lastApkPath = outcome.apk.absolutePath) }
+                    val perms = ApkPermissions.readOrNull(outcome.apk)
+                    if (perms != null) {
+                        note("Permissions (merged manifest): ${AndroidPermissions.summary(perms)}", mirrorConsole)
+                        AndroidPermissions.lines(perms).forEach { note(it, mirrorConsole) }
+                        summary = summary + "\n" + AndroidPermissions.summary(perms)
+                    }
                 }
                 onBuildChanged()
-                TaskRunner.Done(outcome.title, outcome.summary, outcome.apk)
+                TaskRunner.Done(outcome.title, summary, outcome.apk)
             } finally {
                 // Clear after the task releases Res.BUILD — syncBusy() here would see
                 // the lock still held and leave ● BUILDING stuck on the Build tab.

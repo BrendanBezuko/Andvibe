@@ -74,7 +74,8 @@ object Understand {
             apiStyle = apiStyle,
         )
         if (stop()) throw CancellationException("stopped")
-        val markdown = assemble(root.name, prose, defs, focus)
+        val permissions = com.example.andvibe.core.AndroidPermissions.fromSource(root)
+        val markdown = assemble(root.name, prose, defs, focus, permissions)
         return UnderstandResult(markdown, defs.size, defs.map { it.path }.toSet().size)
     }
 
@@ -153,7 +154,13 @@ object Understand {
         }
     }
 
-    private fun assemble(repo: String, prose: String, defs: List<Def>, focus: String): String {
+    private fun assemble(
+        repo: String,
+        prose: String,
+        defs: List<Def>,
+        focus: String,
+        permissions: List<Pair<String, List<com.example.andvibe.core.AndroidPermissions.Permission>>>,
+    ): String {
         val body = prose.trim()
             .removePrefix("```markdown")
             .removePrefix("```md")
@@ -162,6 +169,10 @@ object Understand {
             .ifBlank { "# $repo — How it works\n\n## Overview\n(no model reply)\n" }
         return buildString {
             append(body.trimEnd())
+            // Android repos only; facts from the manifests, not the model.
+            if (permissions.isNotEmpty()) {
+                append("\n\n").append(com.example.andvibe.core.AndroidPermissions.markdown(permissions).trimEnd())
+            }
             append("\n\n## Function definitions\n")
             if (focus.isNotBlank()) {
                 append("\nFocus was: ").append(focus.trim()).append("\n")
