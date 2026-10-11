@@ -116,8 +116,8 @@ class MainControllers(
             closeWorkspaceIfOpen = { if (::workspace.isInitialized) workspace.close() },
             syncBack = syncBack,
             log = logLine,
-            syncVaultKey = { provider, key ->
-                if (::console.isInitialized) console.setVaultKey(provider, key)
+            syncVaultKey = { provider ->
+                if (::console.isInitialized) console.setVaultKey(provider)
             },
         )
         settings.start()
@@ -186,12 +186,9 @@ class MainControllers(
             dp = { dp(it) },
             currentProvider = { vibe.currentProvider() },
             saveProvider = { vibe.saveCurrentProvider() },
-            onSecretsSynced = { gitToken, ssh ->
+            onSecretsSynced = {
                 if (::settings.isInitialized) {
-                    settings.setGitFields(token = gitToken, ssh = ssh)
-                } else {
-                    binding.settingsPage.gitHttpsToken.setText(gitToken)
-                    binding.settingsPage.gitSsh.setText(ssh)
+                    settings.setGitFields(refreshSecrets = true)
                 }
             },
             onVariablesSynced = { _, model, base, gitName, gitEmail, gitUser ->
@@ -209,8 +206,8 @@ class MainControllers(
                     binding.settingsPage.gitHttpsUser.setText(gitUser)
                 }
             },
-            syncApiKeyField = { provider, key ->
-                if (::settings.isInitialized) settings.setApiKeyField(provider, key)
+            syncApiKeyField = { provider ->
+                if (::settings.isInitialized) settings.setApiKeyField(provider)
             },
             paintBusy = paintBusy,
         )

@@ -30,7 +30,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="One key per provider. Vibe uses whichever provider is selected there. Closing this screen saves them."
+            android:text="One key per provider. After save, keys are write-only — leave a field blank to keep the stored value. Closing this screen saves them."
             android:textColor="@color/muted"
             android:textSize="13sp" />
 
@@ -39,12 +39,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical" />
-
-        <com.google.android.material.checkbox.MaterialCheckBox
-            android:id="@+id/showApiKeys"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Show keys" />
 
         <Button
             android:id="@+id/saveApiKeys"

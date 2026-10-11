@@ -16,6 +16,7 @@ import com.example.andvibe.Notify
 import com.example.andvibe.PromptStore
 import com.example.andvibe.Provider
 import com.example.andvibe.R
+import com.example.andvibe.SecretFields
 import com.example.andvibe.SecretStore
 import com.example.andvibe.databinding.PageSettingsBinding
 import com.example.andvibe.features.settings.SettingsFeature
@@ -23,6 +24,8 @@ import com.example.andvibe.features.settings.SettingsFeature
 /**
  * Settings overlay: MCP, background permissions, API keys, prompts, and global git identity.
  * Per-project origin lives on the Git tab.
+ *
+ * Stored secrets are write-only in the UI: fields never reload plaintext; blank keeps existing.
  */
 class SettingsPageController(
     private val activity: AppCompatActivity,
@@ -37,7 +40,7 @@ class SettingsPageController(
     private val closeWorkspaceIfOpen: () -> Unit,
     private val syncBack: () -> Unit,
     private val log: (String) -> Unit,
-    private val syncVaultKey: (Provider, String) -> Unit,
+    private val syncVaultKey: (Provider) -> Unit,
 ) {
     private val apiKeys = linkedMapOf<Provider, EditText>()
     private val customApiKeys = linkedMapOf<String, EditText>()
@@ -65,17 +68,6 @@ class SettingsPageController(
         page.saveApiKeys.setOnClickListener { saveApiKeys(announce = true) }
         page.savePrompts.setOnClickListener { savePrompts(announce = true) }
         page.resetPrompts.setOnClickListener { resetAllPrompts() }
-        page.showApiKeys.setOnCheckedChangeListener { _, checked ->
-            val type = if (checked) {
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            } else {
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            }
-            for (field in apiKeys.values + customApiKeys.values) {
-                field.inputType = type
-                field.setSelection(field.text?.length ?: 0)
-            }
-        }
         buildApiKeyFields()
         buildPromptFields()
     }
@@ -120,43 +112,44 @@ class SettingsPageController(
         if (apiKeys.isEmpty() && customApiKeys.isEmpty()) return
         for ((provider, field) in apiKeys) {
             if (provider == Provider.CUSTOM) continue
-            val key = field.text?.toString()?.trim().orEmpty()
+            val existing = secrets.get(provider, "key", "")
+            val key = SecretFields.nextSecret(field.text?.toString().orEmpty(), existing)
             secrets.saveKey(provider, key)
-            syncVaultKey(provider, key)
+            syncVaultKey(provider)
         }
         for ((id, field) in customApiKeys) {
             val server = secrets.customServers().firstOrNull { it.id == id } ?: continue
-            secrets.upsertCustomServer(
-                server.copy(key = field.text?.toString()?.trim().orEmpty()),
-                select = false,
-            )
+            val key = SecretFields.nextSecret(field.text?.toString().orEmpty(), server.key)
+            secrets.upsertCustomServer(server.copy(key = key), select = false)
         }
-        val activeKey = secrets.get(Provider.CUSTOM, "key", "")
-        syncVaultKey(Provider.CUSTOM, activeKey)
+        syncVaultKey(Provider.CUSTOM)
+        buildApiKeyFields()
         if (announce) page.keyNote.text = "Saved."
     }
 
-    fun setApiKeyField(provider: Provider, key: String) {
+    /** Refresh write-only key field after Console (or elsewhere) updates storage. */
+    fun setApiKeyField(provider: Provider) {
         if (provider == Provider.CUSTOM) {
-            val id = secrets.selectedCustomId()
-            customApiKeys[id]?.setText(key)
+            buildApiKeyFields()
             return
         }
-        apiKeys[provider]?.setText(key)
+        val field = apiKeys[provider] ?: return
+        val emptyHint = "${provider.label} API key"
+        val hasStored = secrets.get(provider, "key", "").isNotBlank()
+        field.setText("")
+        field.hint = SecretFields.hint(emptyHint, hasStored)
     }
 
     fun setGitFields(
         name: String? = null,
         email: String? = null,
         user: String? = null,
-        token: String? = null,
-        ssh: String? = null,
+        refreshSecrets: Boolean = false,
     ) {
         name?.let { page.gitName.setText(it) }
         email?.let { page.gitEmail.setText(it) }
         user?.let { page.gitHttpsUser.setText(it) }
-        token?.let { page.gitHttpsToken.setText(it) }
-        ssh?.let { page.gitSsh.setText(it) }
+        if (refreshSecrets) applyGitSecretFields()
     }
 
     private fun buildApiKeyFields() {
@@ -166,11 +159,12 @@ class SettingsPageController(
         customApiKeys.clear()
         for (provider in Provider.entries) {
             if (provider == Provider.CUSTOM) continue
+            val stored = secrets.get(provider, "key", "")
             addKeyField(
                 parent,
                 key = "${provider.id}_key",
-                hint = "${provider.label} API key",
-                value = secrets.get(provider, "key", ""),
+                emptyHint = "${provider.label} API key",
+                hasStored = stored.isNotBlank(),
             ) { field -> apiKeys[provider] = field }
         }
         val note = TextView(activity).apply {
@@ -189,8 +183,8 @@ class SettingsPageController(
             addKeyField(
                 parent,
                 key = "custom:${server.name}_key",
-                hint = "${server.name} API key",
-                value = server.key,
+                emptyHint = "${server.name} API key",
+                hasStored = server.key.isNotBlank(),
             ) { field -> customApiKeys[server.id] = field }
         }
     }
@@ -198,8 +192,8 @@ class SettingsPageController(
     private fun addKeyField(
         parent: LinearLayout,
         key: String,
-        hint: String,
-        value: String,
+        emptyHint: String,
+        hasStored: Boolean,
         storeField: (EditText) -> Unit,
     ) {
         val label = TextView(activity).apply {
@@ -216,20 +210,16 @@ class SettingsPageController(
         parent.addView(label, labelParams)
 
         val field = EditText(activity).apply {
-            this.hint = hint
+            hint = SecretFields.hint(emptyHint, hasStored)
             setHintTextColor(color(R.color.muted))
             setTextColor(color(R.color.ink))
             setBackgroundResource(R.drawable.bg_field)
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
-            inputType = if (page.showApiKeys.isChecked) {
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            } else {
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            }
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             maxLines = 1
             setPadding(dp(10), dp(10), dp(10), dp(10))
             textSize = 14f
-            setText(value)
+            setText("")
         }
         storeField(field)
         val params = LinearLayout.LayoutParams(
@@ -340,18 +330,37 @@ class SettingsPageController(
         page.gitName.setText(secrets.gitName().ifBlank { "AndVibe" })
         page.gitEmail.setText(secrets.gitEmail().ifBlank { "andvibe@local" })
         page.gitHttpsUser.setText(secrets.gitUser())
-        page.gitHttpsToken.setText(secrets.gitToken())
-        page.gitSsh.setText(secrets.gitSsh())
+        applyGitSecretFields()
         page.gitSettingsNote.text = ""
+    }
+
+    private fun applyGitSecretFields() {
+        page.gitHttpsToken.setText("")
+        page.gitHttpsToken.hint = SecretFields.hint(
+            "GitHub token (PAT)",
+            secrets.gitToken().isNotBlank(),
+        )
+        page.gitSsh.setText("")
+        page.gitSsh.hint = SecretFields.hint(
+            "SSH private key (optional)",
+            secrets.gitSsh().isNotBlank(),
+        )
     }
 
     private fun saveGitSettings() {
         val name = page.gitName.text?.toString()?.trim().orEmpty().ifBlank { "AndVibe" }
         val email = page.gitEmail.text?.toString()?.trim().orEmpty().ifBlank { "andvibe@local" }
         val user = page.gitHttpsUser.text?.toString()?.trim().orEmpty()
-        val token = page.gitHttpsToken.text?.toString().orEmpty()
-        val ssh = page.gitSsh.text?.toString().orEmpty()
+        val token = SecretFields.nextSecret(
+            page.gitHttpsToken.text?.toString().orEmpty(),
+            secrets.gitToken(),
+        )
+        val ssh = SecretFields.nextSecret(
+            page.gitSsh.text?.toString().orEmpty(),
+            secrets.gitSsh(),
+        )
         secrets.saveGit(name, email, user, token, ssh)
+        applyGitSecretFields()
         val note = "Saved git identity."
         page.gitSettingsNote.text = note
         log(note)

@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kover)
 }
 
 android {
@@ -100,4 +101,12 @@ dependencies {
     testImplementation(libs.org.json)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+}
+
+kover {
+    currentProject {
+        createVariant("unit") {
+            add("debug")
+        }
+    }
 }

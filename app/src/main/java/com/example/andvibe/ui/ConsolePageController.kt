@@ -19,6 +19,7 @@ import com.example.andvibe.BusyUi
 import com.example.andvibe.ProjectSession
 import com.example.andvibe.Provider
 import com.example.andvibe.R
+import com.example.andvibe.SecretFields
 import com.example.andvibe.SecretStore
 import com.example.andvibe.databinding.PageConsoleBinding
 import com.example.andvibe.features.console.ConsoleFeature
@@ -31,6 +32,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Renders console tape + Secrets/Variables vault. Forwards commands to [ConsoleFeature].
+ *
+ * Secret fields are write-only: stored plaintext is never loaded into the UI.
  */
 class ConsolePageController(
     private val page: PageConsoleBinding,
@@ -43,7 +46,7 @@ class ConsolePageController(
     private val dp: (Int) -> Int,
     private val currentProvider: () -> Provider,
     private val saveProvider: () -> Unit,
-    private val onSecretsSynced: (gitToken: String, ssh: String) -> Unit,
+    private val onSecretsSynced: () -> Unit,
     private val onVariablesSynced: (
         provider: Provider,
         model: String,
@@ -52,10 +55,11 @@ class ConsolePageController(
         gitEmail: String,
         gitUser: String,
     ) -> Unit,
-    private val syncApiKeyField: (Provider, String) -> Unit,
+    private val syncApiKeyField: (Provider) -> Unit,
     private val paintBusy: () -> Unit,
 ) {
     private val vault = mutableMapOf<String, EditText>()
+    private val secretHints = mutableMapOf<String, String>()
 
     fun start() {
         page.commandRun.setOnClickListener { submitCommand() }
@@ -110,22 +114,29 @@ class ConsolePageController(
 
     fun loadVault() {
         for (provider in Provider.entries) {
-            vault["${provider.id}_key"]?.setText(store.get(provider, "key", ""))
+            applySecretField("${provider.id}_key", store.get(provider, "key", "").isNotBlank())
             vault["${provider.id}_model"]?.setText(store.get(provider, "model", provider.defaultModel))
             vault["${provider.id}_base"]?.setText(store.get(provider, "base", provider.defaultBase))
         }
-        vault["build_token"]?.setText(store.buildToken())
+        applySecretField("build_token", store.buildToken().isNotBlank())
         vault["build_url"]?.setText(store.buildUrl())
         vault["prefer_remote_build"]?.setText(if (store.preferRemoteBuild()) "true" else "false")
-        vault["git_token"]?.setText(store.gitToken())
-        vault["git_ssh"]?.setText(store.gitSsh())
+        applySecretField("git_token", store.gitToken().isNotBlank())
+        applySecretField("git_ssh", store.gitSsh().isNotBlank())
         vault["git_name"]?.setText(store.gitName())
         vault["git_email"]?.setText(store.gitEmail())
         vault["git_user"]?.setText(store.gitUser())
     }
 
-    fun setVaultKey(provider: Provider, key: String) {
-        vault["${provider.id}_key"]?.setText(key)
+    fun setVaultKey(provider: Provider) {
+        applySecretField("${provider.id}_key", store.get(provider, "key", "").isNotBlank())
+    }
+
+    private fun applySecretField(key: String, hasStored: Boolean) {
+        val field = vault[key] ?: return
+        val emptyHint = secretHints[key] ?: field.hint?.toString().orEmpty()
+        field.setText("")
+        field.hint = SecretFields.hint(emptyHint, hasStored)
     }
 
     private fun paintConsoleBusy(running: Boolean) {
@@ -176,7 +187,10 @@ class ConsolePageController(
     private fun buildVault() {
         val secrets = page.secretsList
         val variables = page.variablesList
-        vaultNote(secrets, "API keys and git secrets stay encrypted on this device.")
+        vaultNote(
+            secrets,
+            "API keys and git secrets stay encrypted on this device. After save they are write-only — leave a field blank to keep the stored value.",
+        )
         for (provider in Provider.entries) {
             vaultField(secrets, "${provider.id}_key", "${provider.label} API key", secret = true)
         }
@@ -250,12 +264,14 @@ class ConsolePageController(
         params.topMargin = dp(4)
         parent.addView(field, params)
         vault[key] = field
+        if (secret) secretHints[key] = hint
     }
 
     private fun saveSecrets() {
         val selected = currentProvider()
         for (provider in Provider.entries) {
-            val key = vaultText("${provider.id}_key")
+            val existing = store.get(provider, "key", "")
+            val key = SecretFields.nextSecret(vaultText("${provider.id}_key"), existing)
             store.saveProvider(
                 provider,
                 key,
@@ -263,14 +279,15 @@ class ConsolePageController(
                 store.get(provider, "base", provider.defaultBase),
                 select = provider == selected
             )
-            syncApiKeyField(provider, key)
+            syncApiKeyField(provider)
         }
-        val token = vaultText("build_token")
-        val gitToken = vaultText("git_token")
-        val ssh = vaultText("git_ssh")
+        val token = SecretFields.nextSecret(vaultText("build_token"), store.buildToken())
+        val gitToken = SecretFields.nextSecret(vaultText("git_token"), store.gitToken())
+        val ssh = SecretFields.nextSecret(vaultText("git_ssh"), store.gitSsh())
         store.saveBuild(store.buildUrl(), token)
         store.saveGit(store.gitName(), store.gitEmail(), store.gitUser(), gitToken, ssh)
-        onSecretsSynced(gitToken, ssh)
+        loadVault()
+        onSecretsSynced()
         log.append("saved secrets")
         feature.refreshLog()
         onLog()

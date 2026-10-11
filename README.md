@@ -146,7 +146,7 @@ The phone scans the repo for function and method signatures, packs a file tree a
 
 ## Vibe
 
-Pick OpenAI, Anthropic, Gemini, Grok, OpenRouter, or Custom. The model and base URL start filled in and can be changed. API keys are in Settings. OpenRouter model ids include the vendor, like `anthropic/claude-sonnet-5`.
+Pick OpenAI, Anthropic, Gemini, Grok, OpenRouter, or Custom. The model and base URL start filled in and can be changed. API keys are in Settings (write-only after save — leave a field blank to keep the stored key). OpenRouter model ids include the vendor, like `anthropic/claude-sonnet-5`.
 
 **Custom** supports multiple named servers. On Vibe → Model, pick Custom, then Add servers and set each one’s name, model, base URL, and API style (`OpenAI-compatible` or `Anthropic Messages`). Use Anthropic Messages for a local Anthropic-compatible proxy such as claude-proxy (`POST /v1/messages`, model `claude-code`, base `http://<lan-host>:8787`). Put each server’s API key in Settings. Keys and servers stay on the phone.
 

@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kover)
 }
 
 java {
@@ -19,4 +20,12 @@ dependencies {
     implementation(libs.slf4j.nop)
     api(libs.rhino)
     testImplementation(libs.junit)
+}
+
+kover {
+    currentProject {
+        createVariant("unit") {
+            add("jvm")
+        }
+    }
 }

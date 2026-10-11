@@ -42,3 +42,5 @@ service-account*.json
 # Prebuilt helpers shipped in the APK (built by scripts/build-*.sh).
 !app/src/main/jniLibs/**/*.so
 !app/src/main/assets/toolchain-natives/**/*.so
+# Real Termux ELF fixtures for ElfNeededTest.
+!core/src/test/resources/*.so

@@ -1,11 +1,11 @@
 package com.example.andvibe
 
+import com.example.andvibe.agent.HttpPost
 import com.example.andvibe.core.RepoFiles
 
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
-import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -18,6 +18,25 @@ data class EditResult(val report: String, val written: List<File>)
 
 object AiClient {
     private val systemPrompt get() = PromptStore.get(PromptStore.Kind.EDIT)
+
+    /** Multipart POST: url, headers, boundary, body → response text. */
+    internal fun interface MultipartPost {
+        fun post(url: String, headers: Map<String, String>, boundary: String, body: ByteArray): String
+    }
+
+    // Network seams. Tests swap these (and restore [realHttp]/[realMultipart]); production uses HttpURLConnection.
+    internal val realHttp = HttpPost { url, headers, body ->
+        send(url, headers, "application/json; charset=utf-8", body.toByteArray(Charsets.UTF_8))
+    }
+    internal val realMultipart = MultipartPost { url, headers, boundary, body ->
+        send(url, headers, "multipart/form-data; boundary=$boundary", body)
+    }
+
+    @Volatile
+    internal var http: HttpPost = realHttp
+
+    @Volatile
+    internal var multipart: MultipartPost = realMultipart
 
     private val sourceExt = setOf(
         "js", "mjs", "cjs", "html", "htm", "css", "json", "md", "txt",
@@ -38,14 +57,7 @@ object AiClient {
         apiStyle: ApiStyle = ApiStyle.from(provider),
     ): EditResult {
         if (instruction.length > 16_000) error("prompt is too long")
-        if (key.isBlank()) error("add an API key in Settings")
-        if (model.isBlank()) error("set a model name")
-        if (model.any { it.isWhitespace() }) error("model name has a space")
-        val baseUrl = base.ifBlank { provider.defaultBase }
-        if (baseUrl.isBlank()) error("set a base URL")
-        if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
-            error("base URL must start with https://")
-        }
+        val baseUrl = requireConfig(provider, key, base, model)
         val prompt = buildPrompt(root, cwd, open, instruction)
         val messages = sanitize(history.toList() + ("user" to prompt))
         val style = effectiveStyle(provider, apiStyle)
@@ -54,15 +66,7 @@ object AiClient {
             style == ApiStyle.ANTHROPIC -> anthropic(baseUrl, key, model, messages)
             else -> openaiCompatible(baseUrl, key, model, messages, headers = extraHeaders(provider))
         }
-        val charged = if (reply.input == 0L && reply.output == 0L) {
-            reply.copy(
-                input = guessTokens(prompt.length + systemPrompt.length),
-                output = guessTokens(reply.text.length)
-            )
-        } else {
-            reply
-        }
-        WorkspaceStore.addUse(model, charged.input, charged.output)
+        charge(model, reply, prompt.length + systemPrompt.length)
         val parsed = parse(reply.text)
         val written = apply(root, parsed.second)
         val summary = parsed.first.ifBlank {
@@ -89,14 +93,7 @@ object AiClient {
         apiStyle: ApiStyle = ApiStyle.from(provider),
     ): String {
         if (user.length > maxUser) error("prompt is too long")
-        if (key.isBlank()) error("add an API key in Settings")
-        if (model.isBlank()) error("set a model name")
-        if (model.any { it.isWhitespace() }) error("model name has a space")
-        val baseUrl = base.ifBlank { provider.defaultBase }
-        if (baseUrl.isBlank()) error("set a base URL")
-        if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
-            error("base URL must start with https://")
-        }
+        val baseUrl = requireConfig(provider, key, base, model)
         val messages = listOf("user" to user)
         val style = effectiveStyle(provider, apiStyle)
         val reply = when {
@@ -104,12 +101,7 @@ object AiClient {
             style == ApiStyle.ANTHROPIC -> anthropic(baseUrl, key, model, messages, system)
             else -> openaiCompatible(baseUrl, key, model, messages, system, extraHeaders(provider))
         }
-        val charged = if (reply.input == 0L && reply.output == 0L) {
-            reply.copy(input = guessTokens(user.length + system.length), output = guessTokens(reply.text.length))
-        } else {
-            reply
-        }
-        WorkspaceStore.addUse(model, charged.input, charged.output)
+        charge(model, reply, user.length + system.length)
         return reply.text.trim()
     }
 
@@ -126,12 +118,7 @@ object AiClient {
     ): String {
         if (!audio.isFile || audio.length() == 0L) error("recording is empty")
         if (audio.length() > 24L * 1024 * 1024) error("recording is too large (max 24MB)")
-        if (key.isBlank()) error("add an API key in Settings")
-        val baseUrl = base.ifBlank { provider.defaultBase }
-        if (baseUrl.isBlank()) error("set a base URL")
-        if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
-            error("base URL must start with https://")
-        }
+        val baseUrl = requireConfig(provider, key, base, model = null)
         val style = effectiveStyle(provider, apiStyle)
         val text = when {
             provider == Provider.GEMINI -> geminiTranscribe(baseUrl, key, audio)
@@ -155,10 +142,7 @@ object AiClient {
         apiStyle: ApiStyle = ApiStyle.from(provider),
     ): String {
         if (user.length > 16_000) error("prompt is too long")
-        if (key.isBlank()) error("add an API key in Settings")
-        if (model.isBlank()) error("set a model name")
-        val baseUrl = base.ifBlank { provider.defaultBase }
-        if (baseUrl.isBlank()) error("set a base URL")
+        val baseUrl = requireConfig(provider, key, base, model)
         val messages = listOf("user" to user)
         val style = effectiveStyle(provider, apiStyle)
         val reply = when {
@@ -170,13 +154,32 @@ object AiClient {
                 chatCompletions(baseUrl, key, model, messages, system, extraHeaders(provider), search = true)
             }
         }
-        val charged = if (reply.input == 0L && reply.output == 0L) {
-            reply.copy(input = guessTokens(user.length + system.length), output = guessTokens(reply.text.length))
-        } else {
-            reply
-        }
-        WorkspaceStore.addUse(model, charged.input, charged.output)
+        charge(model, reply, user.length + system.length)
         return reply.text.trim()
+    }
+
+    /** Validates credentials and returns the base URL to use. [model] null skips model checks. */
+    internal fun requireConfig(provider: Provider, key: String, base: String, model: String?): String {
+        if (key.isBlank()) error("add an API key in Settings")
+        if (model != null) {
+            if (model.isBlank()) error("set a model name")
+            if (model.any { it.isWhitespace() }) error("model name has a space")
+        }
+        val baseUrl = base.ifBlank { provider.defaultBase }
+        if (baseUrl.isBlank()) error("set a base URL")
+        if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
+            error("base URL must start with https://")
+        }
+        return baseUrl
+    }
+
+    /** Records usage; estimates from character counts when the provider reported none. */
+    private fun charge(model: String, reply: Reply, promptChars: Int) {
+        if (reply.input == 0L && reply.output == 0L) {
+            WorkspaceStore.addUse(model, guessTokens(promptChars), guessTokens(reply.text.length))
+        } else {
+            WorkspaceStore.addUse(model, reply.input, reply.output)
+        }
     }
 
     private fun buildPrompt(root: File, cwd: File, open: File?, instruction: String): String {
@@ -687,7 +690,7 @@ object AiClient {
         )
         headers.putAll(extraHeaders(provider))
         val body = multipartTranscription(boundary, model, audio)
-        val raw = postMultipart(url, headers, boundary, body)
+        val raw = multipart.post(url, headers, boundary, body)
         return JSONObject(raw).optString("text").trim().ifBlank {
             error("model did not return a transcript")
         }
@@ -764,12 +767,10 @@ object AiClient {
         }
     }
 
-    private fun postMultipart(
-        url: String,
-        headers: Map<String, String>,
-        boundary: String,
-        body: ByteArray,
-    ): String {
+    internal fun post(url: String, headers: Map<String, String>, body: String): String =
+        http.post(url, headers, body)
+
+    private fun send(url: String, headers: Map<String, String>, contentType: String, body: ByteArray): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
@@ -778,9 +779,9 @@ object AiClient {
             conn.doOutput = true
             conn.setRequestProperty("Accept", "application/json")
             conn.setRequestProperty("User-Agent", "AndVibe")
-            conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            conn.setRequestProperty("Content-Type", contentType)
             headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
-            DataOutputStream(conn.outputStream).use { it.write(body) }
+            conn.outputStream.use { it.write(body) }
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
@@ -793,43 +794,7 @@ object AiClient {
         }
     }
 
-    internal fun post(url: String, headers: Map<String, String>, body: String): String {
-        return http("POST", url, headers, body, 180_000)
-    }
-
-    private fun http(
-        method: String,
-        url: String,
-        headers: Map<String, String>,
-        body: String?,
-        readTimeout: Int
-    ): String {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        try {
-            conn.requestMethod = method
-            conn.connectTimeout = 20_000
-            conn.readTimeout = readTimeout
-            conn.setRequestProperty("Accept", "application/json")
-            conn.setRequestProperty("User-Agent", "AndVibe")
-            headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
-            if (body != null) {
-                conn.doOutput = true
-                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) error(httpError(code, text))
-            return text
-        } catch (e: IOException) {
-            error("network: ${e.message}")
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun httpError(code: Int, body: String): String {
+    internal fun httpError(code: Int, body: String): String {
         val message = try {
             val json = JSONObject(body)
             val err = json.optJSONObject("error")
