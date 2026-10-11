@@ -5,7 +5,15 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-object ChatStore {
+/**
+ * Vibe chats, one JSON file per workspace under [dir]. [currentWorkspace] says which workspace
+ * is active; [syncWorkspace] switches files when it changes.
+ */
+class ChatStore(
+    private val dir: File,
+    private val currentWorkspace: () -> String,
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
     data class Chat(
         val id: String,
         val title: String,
@@ -20,16 +28,12 @@ object ChatStore {
         val memory: List<Pair<String, String>>,
     )
 
-    private const val MAX_CHATS = 50
-    private const val MAX_TURN_CHARS = 20_000
-    private lateinit var dir: File
     private var workspaceId = ""
     private var chatId = ""
     private val items = mutableListOf<Chat>()
 
-    fun init(context: android.content.Context) {
-        if (::dir.isInitialized) return
-        dir = File(context.applicationContext.filesDir, "chats").apply { mkdirs() }
+    init {
+        dir.mkdirs()
     }
 
     fun chats(): List<Chat> = items.sortedByDescending { it.updated }
@@ -43,8 +47,7 @@ object ChatStore {
         turns: List<Pair<String, String>>,
         memory: List<Pair<String, String>>,
     ): ChatContent? {
-        if (!::dir.isInitialized) return null
-        val ws = WorkspaceStore.current().id
+        val ws = currentWorkspace()
         if (ws == workspaceId) return null
         save(turns, memory)
         workspaceId = ws
@@ -53,14 +56,14 @@ object ChatStore {
     }
 
     fun save(turns: List<Pair<String, String>>, memory: List<Pair<String, String>>) {
-        if (!::dir.isInitialized || workspaceId.isEmpty()) return
+        if (workspaceId.isEmpty()) return
         val clipped = turns.map { (role, text) -> role to text.take(MAX_TURN_CHARS) }
         if (clipped.isEmpty()) return
         if (chatId.isEmpty()) chatId = UUID.randomUUID().toString()
         val title = clipped.firstOrNull { it.first == "user" }?.second
             ?.replace(Regex("\\s+"), " ")?.trim()?.take(80)
             ?.ifBlank { null } ?: "Chat"
-        val chat = Chat(chatId, title, System.currentTimeMillis(), clipped, memory.toList())
+        val chat = Chat(chatId, title, clock(), clipped, memory.toList())
         val index = items.indexOfFirst { it.id == chatId }
         if (index >= 0) items[index] = chat else items.add(chat)
         while (items.size > MAX_CHATS) items.remove(items.minBy { it.updated })
@@ -98,7 +101,6 @@ object ChatStore {
     }
 
     fun forgetWorkspace(workspace: String, agentBusy: Boolean) {
-        if (!::dir.isInitialized) return
         file(workspace).delete()
         if (workspace != workspaceId) return
         workspaceId = ""
@@ -173,7 +175,7 @@ object ChatStore {
     }
 
     private fun write() {
-        if (!::dir.isInitialized || workspaceId.isEmpty()) return
+        if (workspaceId.isEmpty()) return
         try {
             val arr = JSONArray()
             for (chat in items) {
@@ -197,5 +199,10 @@ object ChatStore {
         } catch (t: Throwable) {
             DebugLog.step("chat", "save failed: ${t.message ?: t.javaClass.simpleName}")
         }
+    }
+
+    private companion object {
+        const val MAX_CHATS = 50
+        const val MAX_TURN_CHARS = 20_000
     }
 }

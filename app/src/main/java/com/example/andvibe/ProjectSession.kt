@@ -8,13 +8,25 @@ import java.io.File
  * Owns the open project: the repos dir, the working directory, and the open file.
  * The single owner for project/workspace scoping (DESIGN.md §3.4).
  */
-class ProjectSession(
-    context: Context,
+class ProjectSession internal constructor(
+    val reposDir: File,
+    private val context: Context?,
     private val onGitInvalidate: () -> Unit = {},
     private val onProjectChanged: () -> Unit = {},
 ) {
-    val appContext: Context = context.applicationContext
-    val reposDir: File = File(appContext.filesDir, "repos").apply { mkdirs() }
+    constructor(
+        context: Context,
+        onGitInvalidate: () -> Unit = {},
+        onProjectChanged: () -> Unit = {},
+    ) : this(
+        File(context.applicationContext.filesDir, "repos").apply { mkdirs() },
+        context.applicationContext,
+        onGitInvalidate,
+        onProjectChanged,
+    )
+
+    /** JVM tests build a session from a temp dir with no Context; they must not reach this. */
+    val appContext: Context get() = context ?: error("ProjectSession has no Android context")
 
     @Volatile var cwd: File = reposDir
     @Volatile var openFile: File? = null

@@ -25,6 +25,7 @@ import com.example.andvibe.shell.Shell
 import com.example.andvibe.tasks.AppDispatchers
 import com.example.andvibe.tasks.Res
 import com.example.andvibe.tasks.TaskRunner
+import java.io.File
 import java.util.ArrayDeque
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -41,6 +42,7 @@ class AppGraph(app: Application) {
     val session: ProjectSession
     val tasks: TaskRunner
     val consoleLog = ConsoleLog()
+    val chats = ChatStore(File(app.filesDir, "chats"), currentWorkspace = { WorkspaceStore.current().id })
     val buildLog = BuildLog()
     val buildService: BuildService
     val toolRegistry: ToolRegistry
@@ -81,7 +83,6 @@ class AppGraph(app: Application) {
         WorkspaceStore.onUsageChanged = { shell.usageChanged() }
         BuildHistory.init(app)
         BuildHistory.onBuildChanged = { shell.buildChanged() }
-        ChatStore.init(app)
         PromptStore.init(app)
         GitIdentity.install(app, secrets)
         WorkspaceStore.migrate()
@@ -155,7 +156,8 @@ class AppGraph(app: Application) {
             },
         )
         vibeFeature = VibeFeature(
-            app = app,
+            prefs = PrefsKeyValueStore(app.getSharedPreferences(VibeFeature.PREFS, android.content.Context.MODE_PRIVATE)),
+            chats = chats,
             agentRuntime = agentRuntime,
             tasks = tasks,
             session = session,
@@ -165,6 +167,8 @@ class AppGraph(app: Application) {
             log = logLine,
             gitBusy = { tasks.holds(Res.GIT) },
             refreshGitSnapshot = { gitFeature.refreshSnapshotIfIdle() },
+            addUsage = { model, input, output -> WorkspaceStore.addUse(model, input, output) },
+            rememberProject = { root -> ProjectStore.remember(app, root) },
         )
         vibeFeature.syncWorkspace()
         vibeFeature.bootstrapFromStore()

@@ -1,11 +1,9 @@
 package com.example.andvibe.features.vibe
 
-import android.content.Context
 import com.example.andvibe.ChatStore
 import com.example.andvibe.DebugLog
-import com.example.andvibe.ProjectStore
+import com.example.andvibe.KeyValueStore
 import com.example.andvibe.Provider
-import com.example.andvibe.WorkspaceStore
 import com.example.andvibe.agent.AgentEvent
 import com.example.andvibe.agent.AgentRuntime
 import com.example.andvibe.agent.AgentStart
@@ -20,7 +18,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 class VibeFeature(
-    app: Context,
+    /** Holds the unsent prompt draft across restarts. */
+    private val prefs: KeyValueStore,
+    private val chats: ChatStore,
     private val agentRuntime: AgentRuntime,
     private val tasks: TaskRunner,
     private val session: com.example.andvibe.ProjectSession,
@@ -30,6 +30,10 @@ class VibeFeature(
     private val log: (String) -> Unit,
     private val gitBusy: () -> Boolean,
     private val refreshGitSnapshot: () -> Unit,
+    /** Adds model token usage to the workspace meter. */
+    private val addUsage: (model: String, input: Long, output: Long) -> Unit,
+    /** Remembers [root] as the last opened project. */
+    private val rememberProject: (File) -> Unit,
 ) {
     data class Creds(
         val provider: Provider,
@@ -64,9 +68,6 @@ class VibeFeature(
         data object RefreshFileList : Effect
     }
 
-    private val draftPrefs =
-        app.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-
     private val _state = MutableStateFlow(State(draftPrompt = loadDraftFromPrefs()))
     val state: StateFlow<State> = _state.asStateFlow()
 
@@ -87,7 +88,7 @@ class VibeFeature(
     }
 
     fun setDraft(text: String) {
-        draftPrefs.edit().putString(KEY_DRAFT, text).apply()
+        prefs.putString(KEY_DRAFT, text)
         _state.update { it.copy(draftPrompt = text) }
     }
 
@@ -107,7 +108,7 @@ class VibeFeature(
     }
 
     fun bootstrapFromStore() {
-        val content = ChatStore.activeContent()
+        val content = chats.activeContent()
         if (content.turns.isEmpty() && content.memory.isEmpty()) return
         _state.update {
             it.copy(chat = content.turns, history = content.memory)
@@ -117,7 +118,7 @@ class VibeFeature(
     fun syncWorkspace(): Boolean {
         if (tasks.holds(Res.AGENT)) return false
         val current = _state.value
-        val loaded = ChatStore.syncWorkspace(current.chat, current.history) ?: return false
+        val loaded = chats.syncWorkspace(current.chat, current.history) ?: return false
         _state.update {
             it.copy(chat = loaded.turns, history = loaded.memory)
         }
@@ -127,7 +128,7 @@ class VibeFeature(
     fun startNewChat(): Boolean {
         if (tasks.holds(Res.AGENT)) return false
         val current = _state.value
-        val loaded = ChatStore.startNewChat(current.chat, current.history)
+        val loaded = chats.startNewChat(current.chat, current.history)
         _state.update {
             it.copy(chat = loaded.turns, history = loaded.memory, agentSteps = emptyList())
         }
@@ -137,7 +138,7 @@ class VibeFeature(
     fun openChat(id: String): Boolean {
         if (tasks.holds(Res.AGENT)) return false
         val current = _state.value
-        val loaded = ChatStore.openChat(id, current.chat, current.history) ?: return false
+        val loaded = chats.openChat(id, current.chat, current.history) ?: return false
         _state.update {
             it.copy(chat = loaded.turns, history = loaded.memory, agentSteps = emptyList())
         }
@@ -146,7 +147,7 @@ class VibeFeature(
 
     fun deleteChat(id: String): ChatStore.ChatContent? {
         if (tasks.holds(Res.AGENT)) return null
-        return ChatStore.deleteChat(id)
+        return chats.deleteChat(id)
             ?.also { loaded ->
                 _state.update {
                     it.copy(chat = loaded.turns, history = loaded.memory, agentSteps = emptyList())
@@ -155,7 +156,7 @@ class VibeFeature(
     }
 
     fun forgetWorkspace(workspaceId: String) {
-        ChatStore.forgetWorkspace(workspaceId, tasks.holds(Res.AGENT))
+        chats.forgetWorkspace(workspaceId, tasks.holds(Res.AGENT))
         if (!tasks.holds(Res.AGENT)) {
             _state.update { it.copy(chat = emptyList(), history = emptyList()) }
         }
@@ -180,7 +181,7 @@ class VibeFeature(
                 stopping = false,
             )
         }
-        ChatStore.save(_state.value.chat, _state.value.history)
+        chats.save(_state.value.chat, _state.value.history)
         setDraft("")
 
         var liveRoot = ctx.startRoot
@@ -215,7 +216,7 @@ class VibeFeature(
                     runRepo = null,
                 )
             }
-            ChatStore.save(_state.value.chat, _state.value.history)
+            chats.save(_state.value.chat, _state.value.history)
         } else {
             syncBusy()
         }
@@ -238,7 +239,7 @@ class VibeFeature(
                 DebugLog.step("agent", event.text)
             }
             is AgentEvent.ToolCall -> Unit
-            is AgentEvent.Usage -> WorkspaceStore.addUse(event.model, event.input, event.output)
+            is AgentEvent.Usage -> addUsage(event.model, event.input, event.output)
             is AgentEvent.FilesChanged -> onFilesChanged()
             is AgentEvent.Done -> {
                 applyRootSwitch(startRoot, liveRoot())
@@ -267,7 +268,7 @@ class VibeFeature(
                 stopping = false,
             )
         }
-        ChatStore.save(_state.value.chat, _state.value.history)
+        chats.save(_state.value.chat, _state.value.history)
         if (writtenPaths.isNotEmpty()) {
             effects.tryEmit(Effect.ReloadOpenFiles(writtenPaths))
             effects.tryEmit(Effect.RefreshFileList)
@@ -280,7 +281,7 @@ class VibeFeature(
         if (startRoot?.canonicalFile == root.canonicalFile) return
         session.cwd = root
         _state.update { it.copy(runRepo = root) }
-        ProjectStore.remember(session.appContext, root)
+        rememberProject(root)
         onProjectChanged()
     }
 
@@ -298,11 +299,15 @@ class VibeFeature(
         onGitUpdate()
     }
 
-    private fun loadDraftFromPrefs(): String =
-        draftPrefs.getString(KEY_DRAFT, "").orEmpty()
+    private fun loadDraftFromPrefs(): String = prefs.getString(KEY_DRAFT).orEmpty()
+
+    /** Saved chats for the current workspace, newest first (for the chat picker). */
+    fun savedChats(): List<ChatStore.Chat> = chats.chats()
+
+    fun activeChatId(): String = chats.activeId()
 
     companion object {
-        private const val PREFS = "andvibe_ui"
+        const val PREFS = "andvibe_ui"
         private const val KEY_DRAFT = "draft_vibe_prompt"
 
         /** Commits agent steps + assistant reply into chat (JVM-testable). */

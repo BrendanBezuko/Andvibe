@@ -20,7 +20,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.andvibe.ApiStyle
 import com.example.andvibe.BusyUi
-import com.example.andvibe.ChatStore
 import com.example.andvibe.CustomServer
 import com.example.andvibe.ProjectMentions
 import com.example.andvibe.Provider
@@ -168,11 +167,11 @@ class VibePageController(
     fun renderHistory() {
         val list = page.historyList
         list.removeAllViews()
-        val chats = ChatStore.chats()
+        val chats = feature.savedChats()
         page.historyEmpty.visibility = if (chats.isEmpty()) View.VISIBLE else View.GONE
         val busy = feature.state.value.busy
         BusyUi.setEnabled(page.newChat, !busy)
-        val active = ChatStore.activeId()
+        val active = feature.activeChatId()
         val stamp = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
         for (chat in chats) {
             val row = inflate.inflate(R.layout.row_card, list, false)
