@@ -6,8 +6,10 @@ import android.os.Looper
 import com.example.andvibe.Tab
 import com.example.andvibe.features.FeatureEffects
 import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** UI capability registered by MainActivity in onStart / cleared in onStop. */
@@ -63,7 +65,8 @@ class Shell {
     fun screenshot(tab: Tab?, timeoutMs: Long = 8_000): Bitmap? {
         val source = screenshotSource ?: return null
         return runBlocking {
-            withTimeoutOrNull(timeoutMs) { source.capture(tab) }
+            // capture() may switch tabs, which touches views: it must start on the main thread.
+            withTimeoutOrNull(timeoutMs) { withContext(Dispatchers.Main) { source.capture(tab) } }
                 ?: error("screenshot timed out")
         }
     }
