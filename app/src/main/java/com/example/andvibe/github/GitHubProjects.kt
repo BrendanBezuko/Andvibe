@@ -1,6 +1,7 @@
 package com.example.andvibe.github
 
 import com.example.andvibe.CardIssue
+import com.example.andvibe.CardType
 import com.example.andvibe.ProjectLink
 import org.json.JSONArray
 import org.json.JSONObject
@@ -58,29 +59,37 @@ class GitHubProjects(private val api: GitHubApi) {
             id = project.getString("id"),
             title = project.optString("title"),
             status = fields.firstOrNull { it.name.equals("Status", ignoreCase = true) },
-            type = fields.firstOrNull { it.name.equals(TYPE_FIELD, ignoreCase = true) },
+            type = findTypeField(fields),
         )
     }
 
-    /** Adds a "Type" single-select field (Feature/Bug/Solution) when the project has none. */
+    /**
+     * Adds a [TYPE_FIELD] single-select (Feature/Bug/Solution) when the project has none.
+     * GitHub reserves the name "Type" for Issue type, so we use "Card type". Creation failures
+     * are swallowed: sync can still push titles and Status.
+     */
     fun ensureTypeField(project: Project): Project {
         if (project.type != null) return project
         val options = JSONArray()
         for ((name, color) in listOf("Feature" to "BLUE", "Bug" to "RED", "Solution" to "GREEN")) {
             options.put(JSONObject().put("name", name).put("color", color).put("description", ""))
         }
-        val data = api.graphql(
-            """
-            mutation(${'$'}project: ID!, ${'$'}options: [ProjectV2SingleSelectFieldOptionInput!]) {
-              createProjectV2Field(input: {projectId: ${'$'}project, dataType: SINGLE_SELECT, name: "$TYPE_FIELD", singleSelectOptions: ${'$'}options}) {
-                projectV2Field { ... on ProjectV2SingleSelectField { id name options { id name } } }
-              }
-            }
-            """.trimIndent(),
-            JSONObject().put("project", project.id).put("options", options),
-        )
-        val field = data.optJSONObject("createProjectV2Field")?.optJSONObject("projectV2Field")
-        return project.copy(type = field?.let { selectField(it) })
+        return try {
+            val data = api.graphql(
+                """
+                mutation(${'$'}project: ID!, ${'$'}options: [ProjectV2SingleSelectFieldOptionInput!]) {
+                  createProjectV2Field(input: {projectId: ${'$'}project, dataType: SINGLE_SELECT, name: "$TYPE_FIELD", singleSelectOptions: ${'$'}options}) {
+                    projectV2Field { ... on ProjectV2SingleSelectField { id name options { id name } } }
+                  }
+                }
+                """.trimIndent(),
+                JSONObject().put("project", project.id).put("options", options),
+            )
+            val field = data.optJSONObject("createProjectV2Field")?.optJSONObject("projectV2Field")
+            project.copy(type = field?.let { selectField(it) })
+        } catch (_: Throwable) {
+            project
+        }
     }
 
     fun items(project: Project): List<Item> {
@@ -217,8 +226,19 @@ class GitHubProjects(private val api: GitHubApi) {
     }
 
     companion object {
-        const val TYPE_FIELD = "Type"
+        /** Custom single-select for Feature/Bug/Solution. Not "Type" — that name is reserved. */
+        const val TYPE_FIELD = "Card type"
         private const val MAX_ITEMS = 1000
+
+        internal fun findTypeField(fields: List<SelectField>): SelectField? {
+            fields.firstOrNull { it.name.equals(TYPE_FIELD, ignoreCase = true) }?.let { return it }
+            fields.firstOrNull { it.name.equals("Kind", ignoreCase = true) }?.let { return it }
+            // Pre-reservation custom field, or a hand-made Type with our options.
+            return fields.firstOrNull { field ->
+                field.name.equals("Type", ignoreCase = true) &&
+                    field.options.any { CardType.parse(it.name) != null }
+            }
+        }
 
         private val ITEMS_QUERY = """
             query(${'$'}project: ID!, ${'$'}after: String) {

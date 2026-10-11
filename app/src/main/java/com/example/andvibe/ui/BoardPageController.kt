@@ -161,7 +161,7 @@ class BoardPageController(
             .setTitle("Link a GitHub Project")
             .setMessage(
                 "Paste the project's URL. Sync uses the GitHub token from Settings; it needs the " +
-                    "\"project\" scope. Columns map to the project's Status field; a Type field is added if missing."
+                    "\"project\" scope. Columns map to Status; a \"Card type\" field is added if missing."
             )
             .setView(wrap)
             .setPositiveButton("Link", null)
@@ -241,7 +241,7 @@ class BoardPageController(
 
     private fun paintRecord(state: BoardFeature.State) {
         val button = page.boardRecord
-        BusyUi.setEnabled(button, !state.drafting)
+        BusyUi.setEnabled(button, !state.drafting && !state.syncing)
         if (state.listening) {
             button.text = "STOP"
             button.setTextColor(activity.getColor(R.color.meter_red))

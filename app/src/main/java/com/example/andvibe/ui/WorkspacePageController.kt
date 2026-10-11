@@ -1,8 +1,12 @@
 package com.example.andvibe.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -16,17 +20,20 @@ import com.example.andvibe.WorkspaceStore
 import com.example.andvibe.databinding.PageWorkspaceBinding
 import com.example.andvibe.databinding.RowWorkspaceBinding
 import com.example.andvibe.databinding.RowWorkspaceRepoBinding
+import com.example.andvibe.features.board.BoardFeature
 import com.example.andvibe.features.workspace.WorkspaceFeature
 import kotlinx.coroutines.launch
 
 /**
- * Workspace overlay: open/close, repo checks/delete, list, rename/create/delete.
+ * Workspace overlay: open/close, repo checks/delete, list, rename/create/delete,
+ * and GitHub Project link for the board.
  * Switch refusals use [WorkspaceFeature.switchBlockedBy] / [WorkspaceFeature.switchTo].
  */
 class WorkspacePageController(
     private val activity: AppCompatActivity,
     private val page: PageWorkspaceBinding,
     private val feature: WorkspaceFeature,
+    private val board: BoardFeature,
     private val lifecycleOwner: LifecycleOwner,
     private val session: ProjectSession,
     private val inflate: LayoutInflater,
@@ -40,6 +47,7 @@ class WorkspacePageController(
     private val refreshFileList: () -> Unit,
     private val markVibeProjectChanged: () -> Unit,
     private val forgetWorkspaceExtras: (String) -> Unit,
+    private val onBoardProjectChanged: () -> Unit,
 ) {
     var isOpen: Boolean = false
         private set
@@ -53,6 +61,17 @@ class WorkspacePageController(
         }
         page.newWorkspace.setOnClickListener { promptNewWorkspace() }
         page.deleteWorkspace.setOnClickListener { confirmDeleteWorkspace() }
+        page.boardProjectLink.setOnClickListener { linkProject() }
+        page.boardProjectOpen.setOnClickListener {
+            WorkspaceStore.current().project?.url?.let { openUrl(it) }
+        }
+        page.boardProjectUnlink.setOnClickListener {
+            confirm("Unlink GitHub Project?", "Cards stay on the board. Sync links are cleared.") {
+                board.unlinkProject()
+                renderBoardProject()
+                onBoardProjectChanged()
+            }
+        }
 
         lifecycleOwner.lifecycleScope.launch {
             lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -101,8 +120,78 @@ class WorkspacePageController(
         val ws = WorkspaceStore.current()
         page.workspaceName.setText(ws.name)
         page.deleteWorkspace.isEnabled = WorkspaceStore.workspaces().size > 1
+        renderBoardProject()
         renderRepoChecks()
         renderWorkspaces()
+    }
+
+    private fun renderBoardProject() {
+        val project = WorkspaceStore.current().project
+        val linked = project != null
+        page.boardProjectUrl.text = project?.url?.removePrefix("https://") ?: "Not linked"
+        page.boardProjectUrl.setTextColor(color(if (linked) R.color.accent else R.color.muted))
+        page.boardProjectLink.text = if (linked) "Change" else "Link"
+        page.boardProjectOpen.isEnabled = linked
+        page.boardProjectUnlink.isEnabled = linked
+    }
+
+    private fun linkProject() {
+        val current = WorkspaceStore.current().project
+        val input = EditText(activity).apply {
+            hint = "https://github.com/users/you/projects/1"
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setText(current?.url.orEmpty())
+        }
+        val pad = (20 * activity.resources.displayMetrics.density).toInt()
+        val wrap = LinearLayout(activity).apply {
+            setPadding(pad, pad / 2, pad, 0)
+            addView(
+                input,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+        val dialog = AlertDialog.Builder(activity)
+            .setTitle("Link a GitHub Project")
+            .setMessage(
+                "Paste an existing project's URL. Sync uses the GitHub token from Settings " +
+                    "(needs the \"project\" scope). Adds a \"Card type\" field if missing."
+            )
+            .setView(wrap)
+            .setPositiveButton("Link", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (board.linkProject(input.text?.toString().orEmpty())) {
+                    dialog.dismiss()
+                    renderBoardProject()
+                    onBoardProjectChanged()
+                    board.sync()
+                } else {
+                    input.error = "Use github.com/users/…/projects/N or github.com/orgs/…/projects/N"
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun confirm(title: String, message: String, ok: () -> Unit) {
+        AlertDialog.Builder(activity)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("OK") { _, _ -> ok() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun openUrl(url: String) {
+        runCatching {
+            activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }
     }
 
     fun renderRepoChecks() {

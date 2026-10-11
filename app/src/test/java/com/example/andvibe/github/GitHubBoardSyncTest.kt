@@ -45,7 +45,7 @@ class GitHubBoardSyncTest {
                 card("b", CardType.FEATURE, CardStatus.HUMAN_TESTING, "Search"),
             ),
         )
-        assertTrue("creates the missing Type field", "createField" in fake.calls)
+        assertTrue("creates the missing Card type field", "createField" in fake.calls)
         assertEquals(2, fake.items.size)
         val crash = fake.items.values.first { it.title == "Crash" }
         assertEquals("note a", crash.body)
@@ -193,5 +193,32 @@ class GitHubBoardSyncTest {
         val out = sync(runner, emptyList())
         assertEquals(CardStatus.DONE, out.cards.single().status)
         assertEquals(3, out.cards.single().issue!!.number)
+    }
+
+    @Test
+    fun reservedTypeFieldNameDoesNotAbortSync() {
+        val fake = FakeGitHub(rejectCreateField = "Name cannot have a reserved value, Name has already been taken")
+        val (_, runner) = setup(fake)
+        val out = sync(runner, listOf(card("a", CardType.BUG, CardStatus.TODO, "Crash")))
+        assertEquals(1, fake.items.size)
+        assertEquals("Crash", fake.items.values.single().title)
+        assertNull(fake.typeOf(fake.items.keys.single()))
+        assertTrue(out.report.warnings.any { it.contains(GitHubProjects.TYPE_FIELD) })
+    }
+
+    @Test
+    fun findTypeFieldPrefersCardTypeThenKindThenLegacyType() {
+        fun field(name: String, vararg options: String) =
+            GitHubProjects.SelectField("id_$name", name, options.map { GitHubProjects.Option(it, it) })
+        assertEquals(
+            "Card type",
+            GitHubProjects.findTypeField(listOf(field("Kind", "Feature"), field("Card type", "Bug")))!!.name,
+        )
+        assertEquals("Kind", GitHubProjects.findTypeField(listOf(field("Kind", "Feature")))!!.name)
+        assertEquals(
+            "Type",
+            GitHubProjects.findTypeField(listOf(field("Type", "Feature", "Bug")))!!.name,
+        )
+        assertNull(GitHubProjects.findTypeField(listOf(field("Type", "Epic"))))
     }
 }

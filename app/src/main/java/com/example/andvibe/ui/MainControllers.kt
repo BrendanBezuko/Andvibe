@@ -128,6 +128,7 @@ class MainControllers(
             activity = activity,
             page = binding.workspacePage,
             feature = graph.workspaceFeature,
+            board = graph.boardFeature,
             lifecycleOwner = activity,
             session = graph.session,
             inflate = activity.layoutInflater,
@@ -145,6 +146,10 @@ class MainControllers(
                 ApkLibrary.forget(activity, id)
                 BuildHistory.forget(id)
                 RequirementsStore.forget(id)
+            },
+            onBoardProjectChanged = {
+                graph.boardFeature.refresh()
+                if (::board.isInitialized) board.renderBoard()
             },
         )
         workspace.start()

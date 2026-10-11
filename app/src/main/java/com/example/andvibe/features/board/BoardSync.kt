@@ -212,6 +212,9 @@ object BoardSync {
                     warnings += "Add Status options on GitHub for: " + missing.joinToString { it.label }
                 }
             }
+            if (project.type == null) {
+                warnings += "Could not add a \"${GitHubProjects.TYPE_FIELD}\" field; Feature/Bug/Solution were not synced."
+            }
 
             val remotes = gh.items(project).map { toRemote(it, project) }
             val plan = plan(cards, remotes, deleted, syncStart, newId)

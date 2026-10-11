@@ -76,7 +76,8 @@ class BoardFeature(
             it.copy(
                 cards = ws.cards,
                 agentBusy = tasks.holds(Res.AGENT),
-                drafting = tasks.holds(Res.BOARD) && !it.syncing,
+                // drafting: only syncBusy() / onBusy, so a refresh inside a task body
+                // (Res.BOARD still held) cannot leave REC permanently disabled.
                 requirements = RequirementsStore.read(ws.id),
                 project = ws.project,
             )
@@ -190,9 +191,11 @@ class BoardFeature(
                 _state.update { it.copy(status = "Sync failed: $msg") }
                 TaskRunner.Done("Board sync failed", msg)
             } finally {
+                // Do not syncBusy() here: Res.BOARD is still held inside the task body.
+                // BusyChanged → onBusy → syncBusy clears drafting after the lock drops
+                // (same race BuildFeature documents for ● BUILDING).
                 main.post {
                     _state.update { it.copy(syncing = false) }
-                    syncBusy()
                     refresh()
                     pump()
                 }
@@ -239,8 +242,8 @@ class BoardFeature(
                 _state.update { it.copy(status = "Raise issue failed: $msg") }
                 TaskRunner.Done("Raise issue failed", msg)
             } finally {
+                // See sync(): syncBusy while Res.BOARD is still held sticks drafting=true.
                 main.post {
-                    syncBusy()
                     refresh()
                     pump()
                 }
@@ -337,8 +340,8 @@ class BoardFeature(
                 TaskRunner.Done("Board voice failed", msg)
             } finally {
                 audio.delete()
+                // See sync(): syncBusy while Res.BOARD is still held sticks drafting=true.
                 main.post {
-                    syncBusy()
                     refresh()
                     pump()
                 }

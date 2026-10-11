@@ -232,6 +232,9 @@ class MainActivity : AppCompatActivity() {
         graph.vibeFeature.syncBusy()
         graph.gitFeature.syncBusy()
         graph.buildFeature.syncBusy()
+        // Board drafting is derived from Res.BOARD; without this, sync/voice finally
+        // can leave drafting=true (cleanup runs before the lock is released) and REC stays dead.
+        graph.boardFeature.syncBusy()
         paintBusy()
     }
 

@@ -12,6 +12,8 @@ import org.json.JSONObject
 class FakeGitHub(
     statusOptions: List<String> = listOf("Todo", "In Progress", "Done"),
     withTypeField: Boolean = false,
+    /** Simulates GitHub rejecting createProjectV2Field (e.g. reserved name). */
+    private val rejectCreateField: String? = null,
 ) {
     class Item(
         val id: String,
@@ -38,7 +40,11 @@ class FakeGitHub(
         fun name(optionId: String?) = options.firstOrNull { it.first == optionId }?.second
     }
 
-    private fun typeField() = Field("F_type", "Type", listOf("O_Feature" to "Feature", "O_Bug" to "Bug", "O_Solution" to "Solution"))
+    private fun typeField() = Field(
+        "F_type",
+        GitHubProjects.TYPE_FIELD,
+        listOf("O_Feature" to "Feature", "O_Bug" to "Bug", "O_Solution" to "Solution"),
+    )
 
     private fun now(): String = Instant.ofEpochSecond(1_800_000_000L + ++tick).toString()
 
@@ -78,7 +84,11 @@ class FakeGitHub(
         val v = json.optJSONObject("variables") ?: JSONObject()
         val data = when {
             "projectV2(number" in query -> { calls += "project"; projectData() }
-            "createProjectV2Field" in query -> { calls += "createField"; createTypeField() }
+            "createProjectV2Field" in query -> {
+                calls += "createField"
+                rejectCreateField?.let { error(it) }
+                createTypeField()
+            }
             "items(first: 100" in query -> { calls += "items"; itemsData() }
             "addProjectV2DraftIssue" in query -> { calls += "createDraft"; createDraft(v) }
             "updateProjectV2DraftIssue" in query -> { calls += "updateDraft"; updateContent(v, issue = false) }

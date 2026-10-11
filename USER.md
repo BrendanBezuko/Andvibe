@@ -38,6 +38,8 @@ These were stated as corrections or emphatic decisions — treat them as constra
   Kanban, chat history) only sees what's in the current workspace.
 - I can always see the active workspace _and_ the active project side by side, so I always
   know what will build and what the agent will modify; I can switch projects from that list.
+- On the Workspace page I can see and change the GitHub Project linked to that workspace's
+  board (link, open, unlink); Sync stays on the Board tab.
 - The workspace tracks tokens used and a price estimate, shown at the very bottom just above
   the nav bar in sharp red/green text.
 - I can reopen previously downloaded/cloned project folders; the last one opens on next launch.
@@ -104,7 +106,8 @@ These were stated as corrections or emphatic decisions — treat them as constra
   with it as it moves.
 - I can tap a card and send it to the agent to build; it moves to In progress.
 - I can raise a bug card as a GitHub issue in the open project's repo.
-- I can link the board to a GitHub Project and sync both ways with one button.
+- I can link the board to a GitHub Project (from the Board or Workspace page) and sync both
+  ways with one button on the Board.
 - I can tap **REC** to speak product notes: the phone records audio, the selected provider
   transcribes it (Whisper / OpenAI-compatible transcription, or Gemini audio), then my chat
   model drafts board cards, moves existing cards when I say their state changed, and keeps a living `REQUIREMENTS.md` (shown on the Board and saved for
