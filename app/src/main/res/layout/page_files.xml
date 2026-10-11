@@ -61,6 +61,42 @@
             android:layout_marginStart="8dp"
             android:text="Close"
             android:visibility="gone" />
+
+        <Button
+            android:id="@+id/editorUndo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Undo"
+            android:text="Undo"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/editorRedo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Redo"
+            android:text="Redo"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/editorFind"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Find and replace"
+            android:text="Find"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/editorGoto"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Go to line"
+            android:text="Line"
+            android:visibility="gone" />
     </LinearLayout>
     </HorizontalScrollView>
 
@@ -88,19 +124,217 @@
             android:textSize="14sp"
             android:visibility="gone" />
 
-        <EditText
-            android:id="@+id/editor"
+        <LinearLayout
+            android:id="@+id/editorPane"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@color/tape"
-            android:fontFamily="monospace"
-            android:gravity="top|start"
-            android:importantForAutofill="no"
-            android:inputType="textMultiLine"
-            android:padding="10dp"
-            android:scrollbars="vertical"
-            android:textColor="@color/ink"
-            android:textSize="14sp"
-            android:visibility="gone" />
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <!-- Find / replace; shown by the Find button. -->
+            <LinearLayout
+                android:id="@+id/findBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/panel"
+                android:orientation="vertical"
+                android:padding="4dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/findQuery"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_field"
+                android:fontFamily="monospace"
+                android:hint="Find"
+                android:imeOptions="actionSearch"
+                android:importantForAutofill="no"
+                android:inputType="text"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:singleLine="true"
+                android:textColor="@color/ink"
+                android:textColorHint="@color/muted"
+                android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/findCount"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:fontFamily="monospace"
+                        android:minWidth="44dp"
+                        android:textColor="@color/muted"
+                        android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/findPrev"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:contentDescription="Previous match"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="↑"
+                android:textColor="@color/ink"
+                android:textSize="15sp" />
+            <TextView
+                android:id="@+id/findNext"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:contentDescription="Next match"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="↓"
+                android:textColor="@color/ink"
+                android:textSize="15sp" />
+            <TextView
+                android:id="@+id/findReplaceToggle"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:contentDescription="Show replace"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="⇄"
+                android:textColor="@color/ink"
+                android:textSize="15sp" />
+            <TextView
+                android:id="@+id/findClose"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:contentDescription="Close find"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="✕"
+                android:textColor="@color/ink"
+                android:textSize="15sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/replaceRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+            <EditText
+                android:id="@+id/replaceText"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_field"
+                android:fontFamily="monospace"
+                android:hint="Replace with"
+                android:imeOptions="actionSearch"
+                android:importantForAutofill="no"
+                android:inputType="text"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:singleLine="true"
+                android:textColor="@color/ink"
+                android:textColorHint="@color/muted"
+                android:textSize="13sp" />
+            <TextView
+                android:id="@+id/replaceOne"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="Replace"
+                android:textColor="@color/accent"
+                android:textSize="13sp" />
+            <TextView
+                android:id="@+id/replaceAll"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="All"
+                android:textColor="@color/accent"
+                android:textSize="13sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.checkbox.MaterialCheckBox
+                        android:id="@+id/findCase"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Match case"
+                        android:textColor="@color/muted"
+                        android:textSize="12sp" />
+
+                    <com.google.android.material.checkbox.MaterialCheckBox
+                        android:id="@+id/findWord"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Whole word"
+                        android:textColor="@color/muted"
+                        android:textSize="12sp" />
+
+                    <com.google.android.material.checkbox.MaterialCheckBox
+                        android:id="@+id/findRegex"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Regex"
+                        android:textColor="@color/muted"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <io.github.rosemoe.sora.widget.CodeEditor
+                android:id="@+id/editor"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <!-- Keys the soft keyboard hides: tab, arrows, brackets. Filled by FilesPageController. -->
+            <HorizontalScrollView
+                android:id="@+id/keyBar"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:background="@color/panel"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/keyBarRow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+
+            <TextView
+                android:id="@+id/editorStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/bg"
+                android:ellipsize="end"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:paddingStart="6dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="3dp"
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
+        </LinearLayout>
     </FrameLayout>
 </LinearLayout>

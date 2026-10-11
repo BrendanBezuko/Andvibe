@@ -1,5 +1,7 @@
 package com.example.andvibe.ui
 
+import com.example.andvibe.editor.EditorPrefs
+import com.example.andvibe.editor.EditorSettings
 import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
@@ -49,7 +51,10 @@ class SettingsPageController(
     var isOpen: Boolean = false
         private set
 
+    private val editorPrefs by lazy { EditorPrefs(activity) }
+
     fun start() {
+        startEditorSettings()
         openSettingsButton.setOnClickListener { open() }
         page.mcpRetry.setOnClickListener {
             DebugMcp.start()
@@ -80,6 +85,7 @@ class SettingsPageController(
         loadGitSettings()
         loadApiKeys()
         loadPrompts()
+        loadEditorSettings()
         page.root.visibility = View.VISIBLE
         syncBack()
     }
@@ -368,5 +374,64 @@ class SettingsPageController(
 
     companion object {
         private const val GITHUB_SETUP_URL = "https://andvibe.org/github/"
+    }
+
+    // ---- Editor ----
+
+    private val editorBoxes get() = listOf(
+        page.editorSpaces, page.editorWrap, page.editorLineNumbers, page.editorHighlight,
+        page.editorAutoClose, page.editorAutoIndent, page.editorSuggestions, page.editorKeyBar,
+    )
+
+    private var loadingEditor = false
+
+    private fun startEditorSettings() {
+        page.editorFontDown.setOnClickListener { stepEditor { it.copy(fontSize = it.fontSize - 1) } }
+        page.editorFontUp.setOnClickListener { stepEditor { it.copy(fontSize = it.fontSize + 1) } }
+        page.editorTabDown.setOnClickListener { stepEditor { it.copy(tabWidth = it.tabWidth - 1) } }
+        page.editorTabUp.setOnClickListener { stepEditor { it.copy(tabWidth = it.tabWidth + 1) } }
+        for (box in editorBoxes) {
+            box.setOnCheckedChangeListener { _, _ ->
+                if (!loadingEditor) editorPrefs.update { readEditorBoxes(it) }
+            }
+        }
+    }
+
+    private fun stepEditor(change: (EditorSettings) -> EditorSettings) {
+        // Round-trip through fromMap so steppers clamp to the same ranges as stored values.
+        val next = EditorSettings.fromMap(change(editorPrefs.load()).toMap())
+        editorPrefs.save(next)
+        paintEditorNumbers(next)
+    }
+
+    private fun readEditorBoxes(s: EditorSettings) = s.copy(
+        insertSpaces = page.editorSpaces.isChecked,
+        wordWrap = page.editorWrap.isChecked,
+        lineNumbers = page.editorLineNumbers.isChecked,
+        highlight = page.editorHighlight.isChecked,
+        autoClose = page.editorAutoClose.isChecked,
+        autoIndent = page.editorAutoIndent.isChecked,
+        suggestions = page.editorSuggestions.isChecked,
+        keyBar = page.editorKeyBar.isChecked,
+    )
+
+    private fun loadEditorSettings() {
+        val s = editorPrefs.load()
+        loadingEditor = true
+        page.editorSpaces.isChecked = s.insertSpaces
+        page.editorWrap.isChecked = s.wordWrap
+        page.editorLineNumbers.isChecked = s.lineNumbers
+        page.editorHighlight.isChecked = s.highlight
+        page.editorAutoClose.isChecked = s.autoClose
+        page.editorAutoIndent.isChecked = s.autoIndent
+        page.editorSuggestions.isChecked = s.suggestions
+        page.editorKeyBar.isChecked = s.keyBar
+        loadingEditor = false
+        paintEditorNumbers(s)
+    }
+
+    private fun paintEditorNumbers(s: EditorSettings) {
+        page.editorFontValue.text = s.fontSize.toString()
+        page.editorTabValue.text = s.tabWidth.toString()
     }
 }

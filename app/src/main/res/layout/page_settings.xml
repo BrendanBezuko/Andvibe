@@ -97,6 +97,162 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
+            android:text="Editor"
+            android:textColor="@color/ink"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Font size"
+                android:textColor="@color/ink"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/editorFontDown"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:contentDescription="Decrease font size"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="−"
+                android:textColor="@color/accent"
+                android:textSize="18sp" />
+
+            <TextView
+                android:id="@+id/editorFontValue"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/editorFontUp"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:contentDescription="Increase font size"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="+"
+                android:textColor="@color/accent"
+                android:textSize="18sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Tab width"
+                android:textColor="@color/ink"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/editorTabDown"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:contentDescription="Decrease tab width"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="−"
+                android:textColor="@color/accent"
+                android:textSize="18sp" />
+
+            <TextView
+                android:id="@+id/editorTabValue"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/editorTabUp"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:contentDescription="Increase tab width"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:text="+"
+                android:textColor="@color/accent"
+                android:textSize="18sp" />
+        </LinearLayout>
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/editorSpaces"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tab key inserts spaces" />
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/editorWrap"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Word wrap" />
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/editorLineNumbers"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Line numbers" />
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/editorHighlight"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Syntax highlighting" />
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/editorAutoClose"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Auto-close brackets and quotes" />
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/editorAutoIndent"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Auto-indent" />
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/editorSuggestions"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Word suggestions while typing" />
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/editorKeyBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Key bar above the keyboard (tab, arrows, symbols)" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Changes apply to the Files editor right away."
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
             android:text="MCP"
             android:textColor="@color/ink"
             android:textSize="14sp" />

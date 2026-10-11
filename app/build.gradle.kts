@@ -92,6 +92,9 @@ dependencies {
     implementation(libs.spongycastle.pkix)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    // Code editor (LGPL-2.1, unmodified) + TextMate highlighting; grammars live in assets/textmate.
+    implementation(libs.sora.editor)
+    implementation(libs.sora.textmate)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
