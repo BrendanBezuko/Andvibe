@@ -19,6 +19,8 @@ import com.example.andvibe.features.settings.SettingsFeature
 import com.example.andvibe.features.understand.UnderstandFeature
 import com.example.andvibe.features.vibe.VibeFeature
 import com.example.andvibe.features.workspace.WorkspaceFeature
+import com.example.andvibe.github.GitHubApi
+import com.example.andvibe.github.GitHubProjects
 import com.example.andvibe.shell.Shell
 import com.example.andvibe.tasks.AppDispatchers
 import com.example.andvibe.tasks.Res
@@ -219,7 +221,17 @@ class AppGraph(app: Application) {
             onLogChanged = { shell.logChanged() },
         )
         RequirementsStore.init(app)
-        boardFeature = BoardFeature(tasks, dispatchers, session, logLine)
+        boardFeature = BoardFeature(
+            tasks = tasks,
+            dispatchers = dispatchers,
+            session = session,
+            log = logLine,
+            github = GitHubProjects(GitHubApi(token = { secrets.gitToken() }, http = { u, h, b -> AiClient.post(u, h, b) })),
+            repoSlug = {
+                val root = session.selectedRoot() ?: session.cwd
+                GitIdentity.githubSlug(GitOps.originUrl(root, session.reposDir))
+            },
+        )
         workspaceFeature = WorkspaceFeature(tasks)
         settingsFeature = SettingsFeature(app, secrets, onMcpChanged = { shell.mcpChanged() })
         buildFeature.loadFromStores()

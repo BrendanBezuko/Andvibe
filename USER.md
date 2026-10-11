@@ -100,12 +100,15 @@ These were stated as corrections or emphatic decisions — treat them as constra
 
 ### Board (Kanban)
 
-- As a user, I track ideas, bugs, and solutions on a kanban scoped to the workspace.
-- I can tap a card and send it to the agent to build.
-- Completed cards move to a completed table and are kept.
+- As a user, I track features, bugs, and solutions on a kanban scoped to the workspace, in
+  status columns: Back burner, To do, In progress, Human testing, Done. A card's type stays
+  with it as it moves.
+- I can tap a card and send it to the agent to build; it moves to In progress.
+- I can raise a bug card as a GitHub issue in the open project's repo.
+- I can link the board to a GitHub Project and sync both ways with one button.
 - I can tap **REC** to speak product notes: the phone records audio, the selected provider
   transcribes it (Whisper / OpenAI-compatible transcription, or Gemini audio), then my chat
-  model drafts board cards and a living `REQUIREMENTS.md` (shown on the Board and saved for
+  model drafts board cards, moves existing cards when I say their state changed, and keeps a living `REQUIREMENTS.md` (shown on the Board and saved for
   the workspace; also written into the open repo when one is selected). Tap **STOP** to finish.
   Anthropic alone cannot transcribe — use OpenAI, OpenRouter, Gemini, Grok, or Custom.
 

@@ -3,6 +3,10 @@ package com.example.andvibe.features.board
 import android.os.Handler
 import android.os.Looper
 import com.example.andvibe.AiClient
+import com.example.andvibe.CardIssue
+import com.example.andvibe.CardStatus
+import com.example.andvibe.CardType
+import com.example.andvibe.ProjectLink
 import com.example.andvibe.ProjectSession
 import com.example.andvibe.PromptStore
 import com.example.andvibe.Provider
@@ -10,6 +14,7 @@ import com.example.andvibe.RequirementsStore
 import com.example.andvibe.Tab
 import com.example.andvibe.WorkspaceStore
 import com.example.andvibe.features.FeatureEffects
+import com.example.andvibe.github.GitHubProjects
 import com.example.andvibe.tasks.AppDispatchers
 import com.example.andvibe.tasks.Res
 import com.example.andvibe.tasks.TaskRunner
@@ -25,6 +30,9 @@ class BoardFeature(
     private val dispatchers: AppDispatchers,
     private val session: ProjectSession,
     private val log: (String) -> Unit,
+    private val github: GitHubProjects,
+    /** owner/repo of the open project's GitHub origin, or blank. */
+    private val repoSlug: () -> String,
 ) {
     data class Creds(
         val provider: Provider,
@@ -42,6 +50,8 @@ class BoardFeature(
         val partial: String = "",
         val status: String = "",
         val requirements: String = "",
+        val project: ProjectLink? = null,
+        val syncing: Boolean = false,
     )
 
     sealed interface Effect {
@@ -66,22 +76,23 @@ class BoardFeature(
             it.copy(
                 cards = ws.cards,
                 agentBusy = tasks.holds(Res.AGENT),
-                drafting = tasks.holds(Res.BOARD),
+                drafting = tasks.holds(Res.BOARD) && !it.syncing,
                 requirements = RequirementsStore.read(ws.id),
+                project = ws.project,
             )
         }
     }
 
-    fun cardsIn(column: WorkspaceStore.Column): List<WorkspaceStore.Card> =
-        WorkspaceStore.cards(column)
+    fun cardsIn(status: CardStatus): List<WorkspaceStore.Card> = WorkspaceStore.cards(status)
 
-    fun addCard(column: String, title: String, body: String) {
-        WorkspaceStore.addCard(column, title, body)
+    fun addCard(type: CardType, status: CardStatus, title: String, body: String): Boolean {
+        val added = WorkspaceStore.addCard(type, status, title, body)
         refresh()
+        return added
     }
 
-    fun moveCard(id: String, column: String) {
-        WorkspaceStore.moveCard(id, column)
+    fun moveCard(id: String, status: CardStatus) {
+        WorkspaceStore.moveCard(id, status)
         refresh()
     }
 
@@ -90,25 +101,32 @@ class BoardFeature(
         refresh()
     }
 
-    fun updateCard(id: String, title: String, body: String) {
-        WorkspaceStore.updateCard(id, title, body)
+    fun updateCard(id: String, title: String, body: String, type: CardType) {
+        WorkspaceStore.updateCard(id, title, body, type)
         refresh()
     }
 
+    /** Sends the card to Vibe and marks it In progress (Done cards are revisited in place). */
     fun buildCard(card: WorkspaceStore.Card) {
         if (tasks.holds(Res.AGENT)) return
+        if (card.status != CardStatus.DONE) moveCard(card.id, CardStatus.IN_PROGRESS)
         effects.tryEmit(Effect.SendToVibe(instructionFor(card)))
     }
 
     fun instructionFor(card: WorkspaceStore.Card): String = Companion.instructionFor(card)
 
     companion object {
+        /** Result lines worth keeping on screen after recording stops. */
+        private val KEEP_STATUS = listOf(
+            "Added", "Moved", "Updated", "Heard", "No board", "Synced", "Sync failed", "Raised", "Raise issue", "Linked",
+        )
+
         /** Board → Vibe prompt (lead + title + note). */
         fun instructionFor(card: WorkspaceStore.Card): String {
-            val lead = when (card.column) {
-                WorkspaceStore.Column.BUG.id -> "Fix this bug from the Board."
-                WorkspaceStore.Column.SOLUTION.id -> "Implement this solution from the Board."
-                WorkspaceStore.Column.COMPLETED.id -> "Revisit this completed Board item."
+            val lead = when {
+                card.status == CardStatus.DONE -> "Revisit this completed Board item."
+                card.type == CardType.BUG -> "Fix this bug from the Board."
+                card.type == CardType.SOLUTION -> "Implement this solution from the Board."
                 else -> "Implement this feature from the Board."
             }
             return buildString {
@@ -120,9 +138,115 @@ class BoardFeature(
                     append("\n\n")
                     append(note)
                 }
+                card.issue?.let { append("\n\nGitHub issue #${it.number}: ${it.url}") }
                 append("\n\nMake a focused change in the open repo. Do not commit.")
             }
         }
+    }
+
+    /** Links the current workspace's board to a GitHub Project URL. False if the URL isn't one. */
+    fun linkProject(url: String): Boolean {
+        val link = ProjectLink.parse(url) ?: return false
+        WorkspaceStore.setProject(link)
+        _state.update { it.copy(status = "Linked ${link.url} — tap Sync") }
+        refresh()
+        return true
+    }
+
+    fun unlinkProject() {
+        WorkspaceStore.setProject(null)
+        _state.update { it.copy(status = "Unlinked GitHub Project") }
+        refresh()
+    }
+
+    /** Two-way sync with the linked GitHub Project. Shares Res.BOARD with voice so they never interleave. */
+    fun sync() {
+        val ws = WorkspaceStore.current()
+        val link = ws.project ?: run {
+            effects.tryEmit(Effect.Toast("Link a GitHub Project first"))
+            return
+        }
+        val start = WorkspaceStore.clock()
+        val startIds = ws.cards.map { it.id }.toSet()
+        _state.update { it.copy(syncing = true, status = "Syncing with GitHub…", partial = "") }
+        val task = tasks.launch("Board sync", Tab.BOARD, setOf(Res.BOARD), dispatchers.io, track = true) {
+            try {
+                val outcome = BoardSync.Runner(github).run(link, ws.cards, ws.deletedRemote, start)
+                WorkspaceStore.updateWorkspace(ws.id) { now ->
+                    // Relinked to another project mid-sync: the outcome's ids don't apply.
+                    if (now.project != link) return@updateWorkspace now
+                    val (cards, tombstones) = BoardSync.merge(
+                        now.cards, now.deletedRemote, outcome.cards, outcome.processedDeletes, startIds, start,
+                    )
+                    now.copy(cards = cards, deletedRemote = tombstones)
+                }
+                val status = outcome.report.summary(outcome.projectTitle)
+                log("Board sync: ${status.replace("\n", " · ")}")
+                _state.update { it.copy(status = status) }
+                TaskRunner.Done("Board synced", status.lineSequence().first())
+            } catch (t: Throwable) {
+                val msg = t.message ?: t.javaClass.simpleName
+                log("Board sync: $msg")
+                _state.update { it.copy(status = "Sync failed: $msg") }
+                TaskRunner.Done("Board sync failed", msg)
+            } finally {
+                main.post {
+                    _state.update { it.copy(syncing = false) }
+                    syncBusy()
+                    refresh()
+                    pump()
+                }
+            }
+        }
+        if (task == null) {
+            _state.update { it.copy(syncing = false, status = "Board is busy — try again") }
+        }
+    }
+
+    /**
+     * Raises [card] as a GitHub issue in the open project's repo. A card already synced as a
+     * draft item is converted in place (same project item); otherwise a new issue is created.
+     */
+    fun raiseIssue(card: WorkspaceStore.Card) {
+        if (card.issue != null) return
+        val wsId = WorkspaceStore.current().id
+        _state.update { it.copy(status = "Raising issue…", partial = "") }
+        val task = tasks.launch("Raise issue", Tab.BOARD, setOf(Res.BOARD), dispatchers.io, track = true) {
+            try {
+                val slug = repoSlug().ifBlank { error("open a project with a GitHub origin first") }
+                val link = card.remote
+                val issue: CardIssue = if (link != null) {
+                    github.convertDraft(link.itemId, github.repositoryId(slug))
+                } else {
+                    val labels = if (card.type == CardType.BUG) listOf("bug") else emptyList()
+                    github.createIssue(slug, card.title, card.body, labels)
+                }
+                WorkspaceStore.updateWorkspace(wsId) { ws ->
+                    ws.copy(
+                        cards = ws.cards.map { c ->
+                            if (c.id != card.id) return@map c
+                            c.copy(issue = issue, remote = c.remote?.copy(contentId = issue.nodeId))
+                        }
+                    )
+                }
+                val status = "Raised issue #${issue.number} in $slug"
+                log("Board: $status")
+                _state.update { it.copy(status = status) }
+                TaskRunner.Done("Issue raised", "#${issue.number} ${card.title}")
+            } catch (t: Throwable) {
+                val msg = t.message ?: t.javaClass.simpleName
+                log("Board raise issue: $msg")
+                _state.update { it.copy(status = "Raise issue failed: $msg") }
+                TaskRunner.Done("Raise issue failed", msg)
+            } finally {
+                main.post {
+                    syncBusy()
+                    refresh()
+                    pump()
+                }
+            }
+        }
+        if (task == null) _state.update { it.copy(status = "Board is busy — try again") }
     }
 
     fun requestEdit(card: WorkspaceStore.Card) {
@@ -133,7 +257,7 @@ class BoardFeature(
         _state.update {
             it.copy(
                 agentBusy = tasks.holds(Res.AGENT),
-                drafting = tasks.holds(Res.BOARD),
+                drafting = tasks.holds(Res.BOARD) && !it.syncing,
             )
         }
     }
@@ -146,9 +270,7 @@ class BoardFeature(
                 status = when {
                     listening -> "Recording…"
                     it.drafting -> "Transcribing…"
-                    else -> it.status.takeIf { s ->
-                        s.startsWith("Added") || s.startsWith("Updated") || s.startsWith("Heard")
-                    }.orEmpty()
+                    else -> it.status.takeIf { s -> KEEP_STATUS.any { s.startsWith(it) } }.orEmpty()
                 },
             )
         }
@@ -181,7 +303,7 @@ class BoardFeature(
         val creds = lastCreds ?: return
         val audio = pendingAudio.removeFirst()
         val workspaceId = WorkspaceStore.current().id
-        val existingCards = WorkspaceStore.current().cards
+        val refs = BoardDraft.refs(WorkspaceStore.current().cards.filter { it.status != CardStatus.DONE })
         val currentReq = RequirementsStore.read(workspaceId)
         val root = session.selectedRoot()
         val task = tasks.launch("Board voice", Tab.BOARD, setOf(Res.BOARD), dispatchers.io, track = true) {
@@ -201,15 +323,9 @@ class BoardFeature(
                         partial = transcript.take(240),
                     )
                 }
-                val result = draftFromVoice(transcript, currentReq, existingCards, creds)
-                val added = applyDraft(result, workspaceId, root)
-                val status = when {
-                    added > 0 && result.requirementsMd.isNotBlank() ->
-                        "Added $added card${if (added == 1) "" else "s"} · requirements updated"
-                    added > 0 -> "Added $added card${if (added == 1) "" else "s"}"
-                    result.requirementsMd.isNotBlank() -> "Updated requirements"
-                    else -> "No new cards"
-                }
+                val result = draftFromVoice(transcript, currentReq, refs, creds)
+                val (added, moved) = applyDraft(result, workspaceId, root, refs)
+                val status = voiceStatus(added, moved, result.requirementsMd.isNotBlank())
                 log("Board voice: $status")
                 _state.update { it.copy(status = status, partial = transcript.take(240)) }
                 TaskRunner.Done("Board updated", status)
@@ -238,19 +354,16 @@ class BoardFeature(
     private fun draftFromVoice(
         transcript: String,
         currentRequirements: String,
-        existingCards: List<WorkspaceStore.Card>,
+        refs: Map<String, WorkspaceStore.Card>,
         creds: Creds,
     ): BoardDraft.Result {
-        val boardLines = existingCards
-            .filter { it.column != WorkspaceStore.Column.COMPLETED.id }
-            .joinToString("\n") { "- [${it.column}] ${it.title}" }
-            .ifBlank { "(none)" }
+        val boardLines = BoardDraft.boardLines(refs)
         val user = buildString {
             append("Spoken notes (new):\n")
             append(transcript.trim())
             append("\n\nCurrent REQUIREMENTS.md:\n")
             append(currentRequirements.ifBlank { "(empty)" })
-            append("\n\nExisting board cards (do not duplicate titles):\n")
+            append("\n\nExisting board cards (ref [type · status] title; do not duplicate titles):\n")
             append(boardLines)
         }
         val raw = AiClient.complete(
@@ -270,7 +383,8 @@ class BoardFeature(
         draft: BoardDraft.Result,
         workspaceId: String,
         root: File?,
-    ): Int {
+        refs: Map<String, WorkspaceStore.Card>,
+    ): Pair<Int, Int> {
         if (draft.requirementsMd.isNotBlank()) {
             RequirementsStore.write(draft.requirementsMd, workspaceId)
             if (root != null && root.isDirectory) {
@@ -279,12 +393,25 @@ class BoardFeature(
                 }
             }
         }
+        // Voice ran against a snapshot; if the user switched workspace meanwhile, leave cards alone.
+        if (WorkspaceStore.current().id != workspaceId) return 0 to 0
         val existing = BoardDraft.existingTitles(WorkspaceStore.current().cards)
         val fresh = BoardDraft.newCards(draft.cards, existing)
         var added = 0
         for (card in fresh) {
-            if (WorkspaceStore.addCard(card.column, card.title, card.body)) added++
+            if (WorkspaceStore.addCard(card.type, card.status, card.title, card.body)) added++
         }
-        return added
+        val moves = BoardDraft.resolveMoves(draft.moves, refs)
+        for ((id, status) in moves) WorkspaceStore.moveCard(id, status)
+        return added to moves.size
+    }
+
+    private fun voiceStatus(added: Int, moved: Int, requirements: Boolean): String {
+        val parts = buildList {
+            if (added > 0) add("Added $added card${if (added == 1) "" else "s"}")
+            if (moved > 0) add("Moved $moved card${if (moved == 1) "" else "s"}")
+            if (requirements) add(if (isEmpty()) "Updated requirements" else "requirements updated")
+        }
+        return parts.joinToString(" · ").ifEmpty { "No board changes" }
     }
 }

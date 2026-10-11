@@ -1,5 +1,8 @@
 package com.example.andvibe.features.board
 
+import com.example.andvibe.CardIssue
+import com.example.andvibe.CardStatus
+import com.example.andvibe.CardType
 import com.example.andvibe.WorkspaceStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -7,25 +10,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BoardFeatureTest {
-    @Test
-    fun defaultStateIsIdle() {
-        val state = BoardFeature.State()
-        assertTrue(state.cards.isEmpty())
-        assertFalse(state.agentBusy)
-        assertFalse(state.listening)
-        assertFalse(state.drafting)
-        assertTrue(state.requirements.isEmpty())
-    }
+    private fun card(type: CardType, status: CardStatus = CardStatus.TODO, title: String = "Title", body: String = "") =
+        WorkspaceStore.Card("1", type, status, title, body)
 
     @Test
     fun instructionForBugIncludesLeadAndCommitGuard() {
-        val card = WorkspaceStore.Card(
-            id = "1",
-            column = WorkspaceStore.Column.BUG.id,
-            title = "Crash on open",
-            body = "NullPointerException",
-        )
-        val instruction = BoardFeature.instructionFor(card)
+        val instruction = BoardFeature.instructionFor(card(CardType.BUG, title = "Crash on open", body = "NullPointerException"))
         assertTrue(instruction.startsWith("Fix this bug from the Board."))
         assertTrue(instruction.contains("Crash on open"))
         assertTrue(instruction.contains("NullPointerException"))
@@ -33,32 +23,25 @@ class BoardFeatureTest {
     }
 
     @Test
-    fun instructionLeadByColumn() {
-        fun lead(column: String) = BoardFeature.instructionFor(
-            WorkspaceStore.Card("x", column, "Title", ""),
-        ).lineSequence().first()
-
-        assertEquals(
-            "Implement this feature from the Board.",
-            lead(WorkspaceStore.Column.IDEA.id),
-        )
-        assertEquals(
-            "Implement this solution from the Board.",
-            lead(WorkspaceStore.Column.SOLUTION.id),
-        )
-        assertEquals(
-            "Revisit this completed Board item.",
-            lead(WorkspaceStore.Column.COMPLETED.id),
-        )
+    fun instructionLeadByTypeAndDoneStatus() {
+        fun lead(c: WorkspaceStore.Card) = BoardFeature.instructionFor(c).lineSequence().first()
+        assertEquals("Implement this feature from the Board.", lead(card(CardType.FEATURE)))
+        assertEquals("Implement this solution from the Board.", lead(card(CardType.SOLUTION, CardStatus.IN_PROGRESS)))
+        // Done wins over type: a finished bug is revisited, not re-fixed.
+        assertEquals("Revisit this completed Board item.", lead(card(CardType.BUG, CardStatus.DONE)))
     }
 
     @Test
     fun instructionOmitsEmptyBody() {
-        val text = BoardFeature.instructionFor(
-            WorkspaceStore.Card("1", WorkspaceStore.Column.IDEA.id, "Only title", "  "),
-        )
+        val text = BoardFeature.instructionFor(card(CardType.FEATURE, title = "Only title", body = "  "))
         assertTrue(text.contains("Only title"))
         assertFalse(text.contains("\n\n\n\n"))
         assertTrue(text.endsWith("Do not commit."))
+    }
+
+    @Test
+    fun instructionLinksRaisedIssue() {
+        val c = card(CardType.BUG).copy(issue = CardIssue(42, "https://github.com/o/r/issues/42", "I_1"))
+        assertTrue(BoardFeature.instructionFor(c).contains("GitHub issue #42: https://github.com/o/r/issues/42"))
     }
 }

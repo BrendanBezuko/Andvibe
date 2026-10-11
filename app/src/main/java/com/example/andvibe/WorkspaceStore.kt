@@ -10,18 +10,17 @@ import java.util.UUID
 import kotlin.math.roundToLong
 
 object WorkspaceStore {
-    enum class Column(val id: String, val label: String) {
-        IDEA("idea", "Features"),
-        BUG("bug", "Bugs"),
-        SOLUTION("solution", "Solutions"),
-        COMPLETED("completed", "Completed");
-
-        companion object {
-            fun from(id: String): Column = entries.firstOrNull { it.id == id } ?: IDEA
-        }
-    }
-
-    data class Card(val id: String, val column: String, val title: String, val body: String)
+    data class Card(
+        val id: String,
+        val type: CardType,
+        val status: CardStatus,
+        val title: String,
+        val body: String,
+        /** Local clock of the last local edit; sync compares it to [CardRemote.syncedAt]. */
+        val updatedAt: Long = 0L,
+        val issue: CardIssue? = null,
+        val remote: CardRemote? = null,
+    )
 
     data class Workspace(
         val id: String,
@@ -30,7 +29,10 @@ object WorkspaceStore {
         val inputTokens: Long,
         val outputTokens: Long,
         val costMicros: Long,
-        val cards: List<Card>
+        val cards: List<Card>,
+        val project: ProjectLink? = null,
+        /** Project item ids of synced cards deleted locally; the next sync removes them on GitHub. */
+        val deletedRemote: List<String> = emptyList(),
     )
 
     private const val MAX_CARDS = 200
@@ -43,6 +45,10 @@ object WorkspaceStore {
 
     @Volatile
     var onUsageChanged: (() -> Unit)? = null
+
+    /** Card edit clock; tests pin it. */
+    @Volatile
+    internal var clock: () -> Long = System::currentTimeMillis
 
     fun init(context: android.content.Context) {
         synchronized(this) {
@@ -63,6 +69,7 @@ object WorkspaceStore {
             currentId = ""
             scoped = false
             onUsageChanged = null
+            clock = System::currentTimeMillis
         }
     }
 
@@ -70,8 +77,8 @@ object WorkspaceStore {
 
     fun workspaces(): List<Workspace> = synchronized(this) { items.toList() }
 
-    fun cards(column: Column): List<Card> = synchronized(this) {
-        live().cards.filter { it.column == column.id }
+    fun cards(status: CardStatus): List<Card> = synchronized(this) {
+        live().cards.filter { it.status == status }
     }
 
     fun downloaded(): List<String> {
@@ -173,7 +180,12 @@ object WorkspaceStore {
         true
     }
 
-    fun addCard(column: String, title: String, body: String): Boolean {
+    fun addCard(
+        type: CardType,
+        status: CardStatus,
+        title: String,
+        body: String,
+    ): Boolean {
         val cleanTitle = title.trim().take(200)
         if (cleanTitle.isEmpty()) return false
         var added = false
@@ -181,37 +193,77 @@ object WorkspaceStore {
             if (ws.cards.size >= MAX_CARDS) return@update ws
             added = true
             val card = Card(
-                UUID.randomUUID().toString(),
-                Column.from(column).id,
-                cleanTitle,
-                body.trim().take(4000)
+                id = UUID.randomUUID().toString(),
+                type = type,
+                status = status,
+                title = cleanTitle,
+                body = body.trim().take(4000),
+                updatedAt = clock(),
             )
             ws.copy(cards = ws.cards + card)
         }
         return added
     }
 
-    fun updateCard(id: String, title: String, body: String) {
+    fun updateCard(id: String, title: String, body: String, type: CardType? = null) {
         val cleanTitle = title.trim().take(200)
         if (cleanTitle.isEmpty()) return
+        editCard(id) { it.copy(title = cleanTitle, body = body.trim().take(4000), type = type ?: it.type) }
+    }
+
+    fun moveCard(id: String, status: CardStatus) {
+        editCard(id) { if (it.status == status) it else it.copy(status = status) }
+    }
+
+    fun setIssue(id: String, issue: CardIssue) {
+        // Not a content edit: no updatedAt bump, so sync doesn't treat it as a local change.
+        update { ws -> ws.copy(cards = ws.cards.map { if (it.id == id) it.copy(issue = issue) else it }) }
+    }
+
+    fun deleteCard(id: String) {
         update { ws ->
+            val gone = ws.cards.firstOrNull { it.id == id } ?: return@update ws
             ws.copy(
-                cards = ws.cards.map { card ->
-                    if (card.id == id) card.copy(title = cleanTitle, body = body.trim().take(4000)) else card
-                }
+                cards = ws.cards - gone,
+                deletedRemote = gone.remote?.let { ws.deletedRemote + it.itemId } ?: ws.deletedRemote,
             )
         }
     }
 
-    fun moveCard(id: String, column: String) {
-        val next = Column.from(column).id
+    /** Links (or with null, unlinks) the current workspace's board to a GitHub Project. */
+    fun setProject(link: ProjectLink?) {
         update { ws ->
-            ws.copy(cards = ws.cards.map { if (it.id == id) it.copy(column = next) else it })
+            if (ws.project == link) return@update ws
+            // A different project means old item ids are meaningless: drop links and tombstones.
+            ws.copy(
+                project = link,
+                cards = ws.cards.map { it.copy(remote = null) },
+                deletedRemote = emptyList(),
+            )
         }
     }
 
-    fun deleteCard(id: String) {
-        update { ws -> ws.copy(cards = ws.cards.filterNot { it.id == id }) }
+    /** Applies [block] to workspace [id] (not necessarily current). False if it no longer exists. */
+    fun updateWorkspace(id: String, block: (Workspace) -> Workspace): Boolean = synchronized(this) {
+        val index = items.indexOfFirst { it.id == id }
+        if (index < 0) return false
+        items[index] = block(items[index])
+        save()
+        true
+    }
+
+    fun workspace(id: String): Workspace? = synchronized(this) { items.firstOrNull { it.id == id } }
+
+    private fun editCard(id: String, block: (Card) -> Card) {
+        update { ws ->
+            ws.copy(
+                cards = ws.cards.map { card ->
+                    if (card.id != id) return@map card
+                    val next = block(card)
+                    if (next == card) card else next.copy(updatedAt = clock())
+                }
+            )
+        }
     }
 
     fun addUse(model: String, input: Long, output: Long) {
@@ -313,7 +365,9 @@ object WorkspaceStore {
                             inputTokens = obj.optLong("input").coerceAtLeast(0),
                             outputTokens = obj.optLong("output").coerceAtLeast(0),
                             costMicros = obj.optLong("micros").coerceAtLeast(0),
-                            cards = readCards(obj.optJSONArray("cards"))
+                            cards = readCards(obj.optJSONArray("cards")),
+                            project = obj.optJSONObject("project")?.let { readProject(it) },
+                            deletedRemote = readStrings(obj.optJSONArray("deleted_remote")),
                         )
                     )
                 }
@@ -348,16 +402,82 @@ object WorkspaceStore {
                 val title = obj.optString("title").trim().take(200)
                 if (title.isEmpty()) continue
                 val id = obj.optString("id").ifBlank { UUID.randomUUID().toString() }
+                val (type, status) = if (obj.has("status")) {
+                    CardType.from(obj.optString("type")) to CardStatus.from(obj.optString("status"))
+                } else {
+                    legacyColumn(obj.optString("column"))
+                }
                 add(
                     Card(
                         id = id,
-                        column = Column.from(obj.optString("column")).id,
+                        type = type,
+                        status = status,
                         title = title,
-                        body = obj.optString("body").trim().take(4000)
+                        body = obj.optString("body").trim().take(4000),
+                        updatedAt = obj.optLong("updated", 0L),
+                        issue = obj.optJSONObject("issue")?.let { readIssue(it) },
+                        remote = obj.optJSONObject("remote")?.let { readRemote(it) },
                     )
                 )
             }
         }
+    }
+
+    /** Pre-status boards had one `column` mixing type and status. */
+    internal fun legacyColumn(column: String): Pair<CardType, CardStatus> = when (column) {
+        "bug" -> CardType.BUG to CardStatus.TODO
+        "solution" -> CardType.SOLUTION to CardStatus.TODO
+        "completed" -> CardType.FEATURE to CardStatus.DONE
+        else -> CardType.FEATURE to CardStatus.TODO
+    }
+
+    private fun readIssue(obj: JSONObject): CardIssue? {
+        val number = obj.optInt("number", 0)
+        val url = obj.optString("url")
+        if (number <= 0 || url.isBlank()) return null
+        return CardIssue(number, url, obj.optString("node"))
+    }
+
+    private fun readRemote(obj: JSONObject): CardRemote? {
+        val item = obj.optString("item")
+        if (item.isBlank()) return null
+        return CardRemote(item, obj.optString("content"), obj.optString("stamp"), obj.optLong("synced", 0L))
+    }
+
+    private fun readProject(obj: JSONObject): ProjectLink? {
+        val owner = obj.optString("owner")
+        val number = obj.optInt("number", 0)
+        if (owner.isBlank() || number <= 0) return null
+        return ProjectLink(owner, obj.optBoolean("org", false), number)
+    }
+
+    private fun readStrings(arr: JSONArray?): List<String> {
+        if (arr == null) return emptyList()
+        return (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+    }
+
+    private fun writeCard(card: Card): JSONObject {
+        val obj = JSONObject()
+            .put("id", card.id)
+            .put("type", card.type.id)
+            .put("status", card.status.id)
+            .put("title", card.title)
+            .put("body", card.body)
+            .put("updated", card.updatedAt)
+        card.issue?.let {
+            obj.put("issue", JSONObject().put("number", it.number).put("url", it.url).put("node", it.nodeId))
+        }
+        card.remote?.let {
+            obj.put(
+                "remote",
+                JSONObject()
+                    .put("item", it.itemId)
+                    .put("content", it.contentId)
+                    .put("stamp", it.stamp)
+                    .put("synced", it.syncedAt),
+            )
+        }
+        return obj
     }
 
     private fun save() {
@@ -368,25 +488,20 @@ object WorkspaceStore {
                 val repos = JSONArray()
                 ws.repos.sorted().forEach { repos.put(it) }
                 val cards = JSONArray()
-                for (card in ws.cards) {
-                    cards.put(
-                        JSONObject()
-                            .put("id", card.id)
-                            .put("column", card.column)
-                            .put("title", card.title)
-                            .put("body", card.body)
-                    )
+                for (card in ws.cards) cards.put(writeCard(card))
+                val obj = JSONObject()
+                    .put("id", ws.id)
+                    .put("name", ws.name)
+                    .put("repos", repos)
+                    .put("input", ws.inputTokens)
+                    .put("output", ws.outputTokens)
+                    .put("micros", ws.costMicros)
+                    .put("cards", cards)
+                ws.project?.let {
+                    obj.put("project", JSONObject().put("owner", it.owner).put("org", it.org).put("number", it.number))
                 }
-                arr.put(
-                    JSONObject()
-                        .put("id", ws.id)
-                        .put("name", ws.name)
-                        .put("repos", repos)
-                        .put("input", ws.inputTokens)
-                        .put("output", ws.outputTokens)
-                        .put("micros", ws.costMicros)
-                        .put("cards", cards)
-                )
+                if (ws.deletedRemote.isNotEmpty()) obj.put("deleted_remote", JSONArray(ws.deletedRemote))
+                arr.put(obj)
             }
             val json = JSONObject().put("current", currentId).put("scoped", scoped).put("items", arr)
             val tmp = File(file.parentFile, file.name + ".tmp")

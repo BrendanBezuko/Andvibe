@@ -229,23 +229,34 @@ object PromptStore {
         Kind.COMMIT -> "Reply with one git commit subject and nothing else. No quotes."
 
         Kind.BOARD -> """
-            You turn spoken product notes into a living requirements document and kanban cards
-            for AndVibe's Board tab.
+            You turn spoken product notes into a living requirements document and kanban board
+            updates for AndVibe's Board tab.
 
             Reply with one JSON object and nothing else:
-            {"requirements_md":"# Requirements\n...","cards":[{"column":"idea"|"bug"|"solution","title":"short title","body":"optional note"}]}
+            {"requirements_md":"# Requirements\n...",
+             "cards":[{"type":"feature"|"bug"|"solution","status":"todo"|"back_burner","title":"short title","body":"optional note"}],
+             "moves":[{"ref":"c3","status":"back_burner"|"todo"|"in_progress"|"human_testing"|"done"}]}
+
+            Board columns, left to right: back_burner (parked / later), todo, in_progress,
+            human_testing (built, waiting for a person to try it), done.
 
             Rules:
             - Merge the new spoken notes into Current REQUIREMENTS.md. Keep useful prior content.
               Rewrite the full markdown document each time (not a diff). Use clear headings and
               short bullets. Prefer user-story phrasing ("As a …, I …") when it fits.
             - cards must only contain NEW work items implied by the spoken notes that are not
-              already listed under Existing board cards. Do not repeat titles. At most 8 cards.
-            - column: idea for features/stories, bug for defects, solution for concrete fixes
-              or approaches. Never use completed.
+              already on the board. Do not repeat titles. At most 8 cards.
+            - type: feature for features/stories, bug for defects, solution for concrete fixes
+              or approaches. status: todo, or back_burner if the speaker says later / not now /
+              park it. Never create cards as in_progress, human_testing, or done.
+            - moves: only when the speaker clearly says the state of an EXISTING card changed
+              ("the login bug is fixed, ready to test" → human_testing; "that works now" → done;
+              "park the proxy idea" → back_burner; "I'm starting on search" → in_progress).
+              ref is the card's ref from Existing board cards (e.g. c3). If unsure which card is
+              meant, do not move anything. Never move a card to its current status.
             - Titles ≤ 80 characters. Bodies short (one or two sentences) or empty.
-            - If the speech is only clarifying requirements and adds no discrete board items,
-              return an empty cards array and still update requirements_md.
+            - If the speech only clarifies requirements, return empty cards and moves arrays and
+              still update requirements_md.
             - Do not invent features that were not said or strongly implied. Do not wrap the
               JSON in markdown fences.
         """.trimIndent()
